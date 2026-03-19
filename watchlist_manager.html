@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dota Watchlist Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Sarabun:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0d0f14;
+    --surface:  #141720;
+    --card:     #1a1e2e;
+    --border:   #2a2f45;
+    --red:      #c0392b;
+    --red-glow: #e74c3c;
+    --gold:     #c9a84c;
+    --gold-lt:  #e8c56d;
+    --text:     #d4cfc8;
+    --muted:    #6b7280;
+    --green:    #27ae60;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Sarabun', sans-serif;
+    font-weight: 400;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(192,57,43,0.12) 0%, transparent 60%),
+      repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(42,47,69,0.3) 39px, rgba(42,47,69,0.3) 40px),
+      repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(42,47,69,0.15) 39px, rgba(42,47,69,0.15) 40px);
+  }
+
+  /* ─── HEADER ─── */
+  header {
+    padding: 32px 24px 24px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: -1px; left: 50%;
+    transform: translateX(-50%);
+    width: 200px; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  }
+  .logo-icon { font-size: 2.4rem; margin-bottom: 8px; }
+  h1 {
+    font-family: 'Cinzel', serif;
+    font-size: 1.6rem;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, var(--gold-lt), var(--gold));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 4px;
+  }
+  .subtitle { color: var(--muted); font-size: 0.8rem; letter-spacing: 2px; text-transform: uppercase; }
+
+  /* ─── LAYOUT ─── */
+  .container { max-width: 900px; margin: 0 auto; padding: 24px 20px 60px; }
+
+  /* ─── TABS ─── */
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 10px 20px; cursor: pointer;
+    font-size: 0.85rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--muted); border-bottom: 2px solid transparent;
+    transition: all 0.2s; margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--gold-lt); border-bottom-color: var(--gold); }
+
+  /* ─── PANEL ─── */
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ─── CARD ─── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem; letter-spacing: 3px; text-transform: uppercase;
+    color: var(--gold); margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card-title::after {
+    content: ''; flex: 1; height: 1px;
+    background: linear-gradient(90deg, var(--border), transparent);
+  }
+
+  /* ─── FORM ─── */
+  .form-row { display: grid; gap: 12px; margin-bottom: 12px; }
+  .form-row.cols-2 { grid-template-columns: 1fr 1fr; }
+  .form-row.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+  label { font-size: 0.75rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; display: block; margin-bottom: 6px; }
+  input, textarea, select {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 12px;
+    color: var(--text); font-family: 'Sarabun', sans-serif; font-size: 0.9rem;
+    transition: border-color 0.2s;
+    outline: none;
+  }
+  input:focus, textarea:focus { border-color: var(--gold); }
+  textarea { resize: vertical; min-height: 80px; }
+
+  .lookup-row { display: flex; gap: 8px; align-items: flex-end; }
+  .lookup-row input { flex: 1; }
+
+  /* ─── BUTTONS ─── */
+  .btn {
+    padding: 10px 20px; border: none; border-radius: 6px;
+    font-family: 'Sarabun', sans-serif; font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; transition: all 0.2s; letter-spacing: 0.5px;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #8b1a12, var(--red));
+    color: #fff; border: 1px solid rgba(231,76,60,0.4);
+  }
+  .btn-primary:hover { background: linear-gradient(135deg, var(--red), var(--red-glow)); box-shadow: 0 0 16px rgba(231,76,60,0.3); }
+  .btn-gold {
+    background: linear-gradient(135deg, #7a5c1e, var(--gold));
+    color: #1a1200; border: 1px solid rgba(201,168,76,0.4);
+  }
+  .btn-gold:hover { background: linear-gradient(135deg, var(--gold), var(--gold-lt)); }
+  .btn-ghost {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { color: var(--text); border-color: var(--text); }
+  .btn-danger { background: transparent; color: var(--red); border: 1px solid rgba(192,57,43,0.4); }
+  .btn-danger:hover { background: rgba(192,57,43,0.15); }
+  .btn-sm { padding: 6px 12px; font-size: 0.78rem; }
+
+  /* ─── PLAYER CARDS ─── */
+  .player-list { display: flex; flex-direction: column; gap: 10px; }
+  .player-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+    display: grid; grid-template-columns: auto 1fr auto;
+    gap: 14px; align-items: start;
+    transition: border-color 0.2s;
+  }
+  .player-card:hover { border-color: rgba(201,168,76,0.3); }
+
+  .player-avatar {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--card); border: 2px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem; flex-shrink: 0;
+    position: relative; overflow: hidden;
+  }
+  .player-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+  .player-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 2px; }
+  .player-id { font-size: 0.75rem; color: var(--muted); margin-bottom: 6px; }
+  .player-note { font-size: 0.82rem; color: #9ca3af; line-height: 1.5; margin-bottom: 6px; }
+
+  .tag-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 99px;
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.5px;
+    background: rgba(201,168,76,0.15); color: var(--gold);
+    border: 1px solid rgba(201,168,76,0.3);
+    margin-bottom: 4px;
+  }
+  .tag-badge.good   { background: rgba(39,174,96,0.12); color: #2ecc71; border-color: rgba(46,204,113,0.3); }
+  .tag-badge.carry  { background: rgba(52,152,219,0.12); color: #3498db; border-color: rgba(52,152,219,0.3); }
+  .tag-badge.danger { background: rgba(192,57,43,0.12); color: var(--red-glow); border-color: rgba(231,76,60,0.3); }
+
+  .player-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  /* ─── LOOKUP RESULT ─── */
+  .lookup-result {
+    margin-top: 12px; padding: 12px; border-radius: 6px;
+    background: rgba(39,174,96,0.08); border: 1px solid rgba(39,174,96,0.25);
+    display: none;
+  }
+  .lookup-result.error { background: rgba(192,57,43,0.08); border-color: rgba(192,57,43,0.25); }
+  .lookup-name { font-weight: 600; font-size: 0.95rem; }
+  .lookup-meta { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+
+  /* ─── IMPORT / EXPORT ─── */
+  .json-box {
+    font-family: 'Courier New', monospace; font-size: 0.78rem;
+    background: #0a0c10; border: 1px solid var(--border);
+    border-radius: 6px; padding: 14px; white-space: pre-wrap;
+    max-height: 300px; overflow-y: auto; line-height: 1.6;
+    color: #a8d8a8;
+  }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* ─── STATS BAR ─── */
+  .stats-bar {
+    display: flex; gap: 20px; padding: 14px 18px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; margin-bottom: 20px;
+  }
+  .stat { text-align: center; }
+  .stat-val { font-family: 'Cinzel', serif; font-size: 1.3rem; color: var(--gold-lt); }
+  .stat-lbl { font-size: 0.7rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+
+  /* ─── SEARCH ─── */
+  .search-bar {
+    position: relative; margin-bottom: 16px;
+  }
+  .search-bar input { padding-left: 38px; }
+  .search-icon {
+    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    color: var(--muted); font-size: 0.9rem;
+  }
+
+  /* ─── EMPTY STATE ─── */
+  .empty {
+    text-align: center; padding: 48px 20px;
+    color: var(--muted);
+  }
+  .empty-icon { font-size: 2.5rem; margin-bottom: 12px; opacity: 0.5; }
+  .empty-text { font-size: 0.9rem; }
+
+  /* ─── TOAST ─── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 18px;
+    font-size: 0.85rem; color: var(--text);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    transform: translateY(80px); opacity: 0;
+    transition: all 0.3s; pointer-events: none; z-index: 999;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { border-color: rgba(39,174,96,0.4); }
+  #toast.error   { border-color: rgba(192,57,43,0.4); }
+
+  /* ─── EDIT MODAL ─── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px; width: 100%; max-width: 480px; margin: 20px;
+  }
+  .modal-title { font-family: 'Cinzel', serif; font-size: 0.9rem; letter-spacing: 2px; color: var(--gold); margin-bottom: 18px; }
+
+  /* ─── DIVIDER ─── */
+  .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+  @media (max-width: 600px) {
+    .form-row.cols-2, .form-row.cols-3 { grid-template-columns: 1fr; }
+    .player-card { grid-template-columns: auto 1fr; }
+    .player-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-icon">🛡️</div>
+  <h1>Dota Watchlist</h1>
+  <div class="subtitle">Player Tracker &amp; Alert System</div>
+</header>
+
+<div class="container">
+
+  <!-- TABS -->
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('list')">📋 Watchlist</div>
+    <div class="tab" onclick="switchTab('add')">➕ เพิ่มผู้เล่น</div>
+    <div class="tab" onclick="switchTab('io')">📦 Import / Export</div>
+  </div>
+
+  <!-- ── TAB: LIST ── -->
+  <div id="tab-list" class="panel active">
+    <div class="stats-bar">
+      <div class="stat"><div class="stat-val" id="stat-total">0</div><div class="stat-lbl">ทั้งหมด</div></div>
+      <div class="stat"><div class="stat-val" id="stat-good">0</div><div class="stat-lbl">ดีเยี่ยม</div></div>
+      <div class="stat"><div class="stat-val" id="stat-carry">0</div><div class="stat-lbl">Carry</div></div>
+      <div class="stat"><div class="stat-val" id="stat-danger">0</div><div class="stat-lbl">อันตราย</div></div>
+    </div>
+
+    <div class="search-bar">
+      <span class="search-icon">🔍</span>
+      <input id="search-input" type="text" placeholder="ค้นหาชื่อหรือ Account ID..." oninput="renderList()">
+    </div>
+
+    <div id="player-list" class="player-list"></div>
+  </div>
+
+  <!-- ── TAB: ADD ── -->
+  <div id="tab-add" class="panel">
+    <div class="card">
+      <div class="card-title">ค้นหาผู้เล่นจาก OpenDota</div>
+      <div class="lookup-row">
+        <div>
+          <label>Account ID (Steam32)</label>
+          <input id="lookup-id" type="text" placeholder="เช่น 123456789" />
+        </div>
+        <button class="btn btn-ghost" onclick="lookupPlayer()">🔎 ค้นหา</button>
+      </div>
+      <div id="lookup-result" class="lookup-result"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">ข้อมูลผู้เล่น</div>
+      <div class="form-row cols-2">
+        <div>
+          <label>Account ID *</label>
+          <input id="add-id" type="text" placeholder="Steam32 Account ID" />
+        </div>
+        <div>
+          <label>ชื่อผู้เล่น</label>
+          <input id="add-name" type="text" placeholder="(ดึงอัตโนมัติหากค้นหา)" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label>แท็ก</label>
+          <select id="add-tag">
+            <option value="">— ไม่มีแท็ก —</option>
+            <option value="good">⭐ เล่นดี / เล่นเก่ง</option>
+            <option value="carry">🎯 Hard Carry</option>
+            <option value="support">💚 Support ดี</option>
+            <option value="midlane">⚡ Mid ดี</option>
+            <option value="danger">⚠️ น่ากลัว</option>
+            <option value="smurf">🎭 Smurf</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label>Note / บันทึก</label>
+          <textarea id="add-note" placeholder="เช่น: Invoker เก่งมาก mid คนนี้อย่าไปโดน..."></textarea>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end;">
+        <button class="btn btn-primary" onclick="addPlayer()">➕ เพิ่มลง Watchlist</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB: I/O ── -->
+  <div id="tab-io" class="panel">
+    <div class="card">
+      <div class="card-title">📤 Export — watchlist.json</div>
+      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:14px;">
+        Copy JSON ด้านล่างแล้วนำไปแทนไฟล์ <code style="color:var(--gold)">watchlist.json</code> ใน GitHub repository
+      </p>
+      <div id="export-box" class="json-box"></div>
+      <hr class="divider">
+      <div class="btn-row">
+        <button class="btn btn-gold btn-sm" onclick="copyExport()">📋 Copy JSON</button>
+        <button class="btn btn-ghost btn-sm" onclick="downloadExport()">⬇️ Download watchlist.json</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📥 Import — วาง JSON ที่นี่</div>
+      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:14px;">
+        วาง JSON จากไฟล์ <code style="color:var(--gold)">watchlist.json</code> ที่มีอยู่เพื่อโหลด Watchlist เดิม
+      </p>
+      <textarea id="import-box" placeholder='{"players": [...]}' style="min-height:120px; font-family:monospace; font-size:0.8rem;"></textarea>
+      <hr class="divider">
+      <div class="btn-row">
+        <button class="btn btn-primary btn-sm" onclick="importData()">📥 Import</button>
+        <button class="btn btn-danger btn-sm" onclick="clearAll()">🗑️ ล้างทั้งหมด</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">⚙️ วิธีใช้งาน</div>
+      <div style="font-size:0.85rem; color:#9ca3af; line-height:1.9;">
+        <b style="color:var(--gold-lt)">1.</b> เพิ่มผู้เล่นที่ tab "เพิ่มผู้เล่น"<br>
+        <b style="color:var(--gold-lt)">2.</b> Export JSON แล้ว commit ไฟล์ <code>watchlist.json</code> ลง GitHub repo<br>
+        <b style="color:var(--gold-lt)">3.</b> GitHub Actions จะรันทุก 30 นาที และเช็คแต่ละ match ใหม่<br>
+        <b style="color:var(--gold-lt)">4.</b> เมื่อเจอผู้เล่นใน Watchlist → แจ้งเตือนผ่าน Line ทันที 🎉<br><br>
+        <b style="color:#6b7280">Secrets ที่ต้องตั้งใน GitHub:</b><br>
+        <code style="color:var(--red-glow)">MY_DOTA_ID</code> = Steam32 Account ID ของคุณ<br>
+        <code style="color:var(--red-glow)">LINE_TOKEN</code> = Line Notify Token
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- EDIT MODAL -->
+<div id="edit-modal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-title">✏️ แก้ไขข้อมูลผู้เล่น</div>
+    <input type="hidden" id="edit-idx">
+    <div class="form-row">
+      <div><label>ชื่อผู้เล่น</label><input id="edit-name" type="text"></div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label>แท็ก</label>
+        <select id="edit-tag">
+          <option value="">— ไม่มีแท็ก —</option>
+          <option value="good">⭐ เล่นดี / เล่นเก่ง</option>
+          <option value="carry">🎯 Hard Carry</option>
+          <option value="support">💚 Support ดี</option>
+          <option value="midlane">⚡ Mid ดี</option>
+          <option value="danger">⚠️ น่ากลัว</option>
+          <option value="smurf">🎭 Smurf</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div><label>Note</label><textarea id="edit-note"></textarea></div>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+      <button class="btn btn-ghost" onclick="closeModal()">ยกเลิก</button>
+      <button class="btn btn-gold" onclick="saveEdit()">💾 บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────────────────────────────
+let watchlist = JSON.parse(localStorage.getItem('dota_watchlist') || '{"players":[]}');
+
+// ─── TABS ─────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const tabs = ['list','add','io'];
+    t.classList.toggle('active', tabs[i] === name);
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'list') renderList();
+  if (name === 'io') renderExport();
+}
+
+// ─── RENDER LIST ──────────────────────────────────────────────────────────────
+const TAG_LABELS = {
+  good: 'เล่นดี', carry: 'Hard Carry', support: 'Support',
+  midlane: 'Mid', danger: 'น่ากลัว', smurf: 'Smurf'
+};
+const TAG_CLASS = { good: 'good', carry: 'carry', danger: 'danger' };
+
+function renderList() {
+  const q = document.getElementById('search-input').value.toLowerCase();
+  const players = watchlist.players.filter(p =>
+    !q || p.name?.toLowerCase().includes(q) || String(p.account_id).includes(q)
+  );
+
+  document.getElementById('stat-total').textContent = watchlist.players.length;
+  document.getElementById('stat-good').textContent  = watchlist.players.filter(p => p.tag === 'good').length;
+  document.getElementById('stat-carry').textContent = watchlist.players.filter(p => p.tag === 'carry').length;
+  document.getElementById('stat-danger').textContent= watchlist.players.filter(p => p.tag === 'danger').length;
+
+  const container = document.getElementById('player-list');
+  if (!players.length) {
+    container.innerHTML = `<div class="empty"><div class="empty-icon">🛡️</div><div class="empty-text">${q ? 'ไม่พบผู้เล่นที่ค้นหา' : 'Watchlist ยังว่าง — ไปเพิ่มผู้เล่นกันเลย!'}</div></div>`;
+    return;
+  }
+
+  container.innerHTML = players.map((p, i) => {
+    const realIdx = watchlist.players.indexOf(p);
+    const tagLabel = TAG_LABELS[p.tag] || p.tag || '';
+    const tagCls   = TAG_CLASS[p.tag] || '';
+    const tagHtml  = tagLabel ? `<span class="tag-badge ${tagCls}">${tagLabel}</span>` : '';
+    const initials = (p.name || '?').charAt(0).toUpperCase();
+    return `
+      <div class="player-card">
+        <div class="player-avatar">${initials}</div>
+        <div>
+          <div class="player-name">${p.name || '(ไม่ระบุชื่อ)'}</div>
+          <div class="player-id">ID: ${p.account_id}</div>
+          ${tagHtml}
+          ${p.note ? `<div class="player-note">📝 ${p.note}</div>` : ''}
+        </div>
+        <div class="player-actions">
+          <button class="btn btn-ghost btn-sm" onclick="openEdit(${realIdx})">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="removePlayer(${realIdx})">🗑️</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ─── LOOKUP ───────────────────────────────────────────────────────────────────
+async function lookupPlayer() {
+  const id = document.getElementById('lookup-id').value.trim();
+  if (!id) return toast('กรุณากรอก Account ID', 'error');
+  const res = document.getElementById('lookup-result');
+  res.style.display = 'block'; res.className = 'lookup-result';
+  res.innerHTML = '🔄 กำลังค้นหา...';
+  try {
+    const r = await fetch(`https://api.opendota.com/api/players/${id}`);
+    const data = await r.json();
+    if (!data || !data.profile) throw new Error('ไม่พบผู้เล่น');
+    const p = data.profile;
+    res.innerHTML = `<div class="lookup-name">✅ ${p.personaname}</div><div class="lookup-meta">ID: ${p.account_id} | Steam: ${p.steamid}</div>`;
+    document.getElementById('add-id').value = p.account_id;
+    document.getElementById('add-name').value = p.personaname;
+  } catch(e) {
+    res.className = 'lookup-result error';
+    res.innerHTML = `❌ ไม่พบผู้เล่น — ลองตรวจสอบ Account ID อีกครั้ง`;
+  }
+}
+
+// ─── ADD PLAYER ───────────────────────────────────────────────────────────────
+function addPlayer() {
+  const id   = document.getElementById('add-id').value.trim();
+  const name = document.getElementById('add-name').value.trim();
+  const tag  = document.getElementById('add-tag').value;
+  const note = document.getElementById('add-note').value.trim();
+
+  if (!id) return toast('กรุณากรอก Account ID', 'error');
+  if (watchlist.players.find(p => String(p.account_id) === id))
+    return toast('ผู้เล่นนี้อยู่ใน Watchlist แล้ว', 'error');
+
+  watchlist.players.push({ account_id: parseInt(id) || id, name, tag, note, added: new Date().toISOString() });
+  save();
+  toast('✅ เพิ่มผู้เล่นเรียบร้อย!', 'success');
+  document.getElementById('add-id').value = '';
+  document.getElementById('add-name').value = '';
+  document.getElementById('add-tag').value = '';
+  document.getElementById('add-note').value = '';
+  document.getElementById('lookup-result').style.display = 'none';
+}
+
+// ─── REMOVE ───────────────────────────────────────────────────────────────────
+function removePlayer(idx) {
+  if (!confirm(`ลบ "${watchlist.players[idx].name || watchlist.players[idx].account_id}" ออกจาก Watchlist?`)) return;
+  watchlist.players.splice(idx, 1);
+  save(); renderList();
+  toast('🗑️ ลบผู้เล่นแล้ว');
+}
+
+// ─── EDIT ─────────────────────────────────────────────────────────────────────
+function openEdit(idx) {
+  const p = watchlist.players[idx];
+  document.getElementById('edit-idx').value = idx;
+  document.getElementById('edit-name').value = p.name || '';
+  document.getElementById('edit-tag').value = p.tag || '';
+  document.getElementById('edit-note').value = p.note || '';
+  document.getElementById('edit-modal').classList.add('show');
+}
+function closeModal() { document.getElementById('edit-modal').classList.remove('show'); }
+function saveEdit() {
+  const idx = parseInt(document.getElementById('edit-idx').value);
+  watchlist.players[idx].name = document.getElementById('edit-name').value.trim();
+  watchlist.players[idx].tag  = document.getElementById('edit-tag').value;
+  watchlist.players[idx].note = document.getElementById('edit-note').value.trim();
+  save(); renderList(); closeModal();
+  toast('💾 บันทึกเรียบร้อย!', 'success');
+}
+
+// ─── EXPORT / IMPORT ─────────────────────────────────────────────────────────
+function renderExport() {
+  document.getElementById('export-box').textContent = JSON.stringify(watchlist, null, 2);
+}
+function copyExport() {
+  navigator.clipboard.writeText(JSON.stringify(watchlist, null, 2));
+  toast('📋 Copied to clipboard!', 'success');
+}
+function downloadExport() {
+  const blob = new Blob([JSON.stringify(watchlist, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'watchlist.json'; a.click();
+  toast('⬇️ Downloaded!', 'success');
+}
+function importData() {
+  try {
+    const data = JSON.parse(document.getElementById('import-box').value);
+    if (!data.players) throw new Error('format ไม่ถูกต้อง');
+    watchlist = data; save();
+    document.getElementById('import-box').value = '';
+    renderExport(); renderList();
+    toast(`✅ Import สำเร็จ — ${data.players.length} ผู้เล่น`, 'success');
+  } catch(e) {
+    toast('❌ JSON ไม่ถูกต้อง', 'error');
+  }
+}
+function clearAll() {
+  if (!confirm('ยืนยันลบ Watchlist ทั้งหมด?')) return;
+  watchlist = { players: [] }; save(); renderList(); renderExport();
+  toast('🗑️ ล้างแล้ว');
+}
+
+// ─── PERSIST ─────────────────────────────────────────────────────────────────
+function save() {
+  localStorage.setItem('dota_watchlist', JSON.stringify(watchlist));
+  renderExport();
+}
+
+// ─── TOAST ────────────────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = '', 3000);
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+renderList();
+</script>
+</body>
+</html>
