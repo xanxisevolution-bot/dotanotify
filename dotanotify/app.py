@@ -18,6 +18,7 @@ from dotanotify.gsi import GSIServer, find_dota_cfg_dirs, install_gsi_cfg
 class DotaNotifyApp:
     def __init__(self, root):
         self.root = root
+        self._install_edit_bindings()
         self.root.title("DotaNotify — Dota Watchlist")
         self.root.geometry("900x620")
         self.root.minsize(820, 560)
@@ -34,6 +35,62 @@ class DotaNotifyApp:
         self.root.after(200, self._drain_events)
         if self.cfg.auto_start:
             self.start_monitor()
+
+    def _install_edit_bindings(self):
+        def select_all(widget):
+            widget.focus_set()
+            if isinstance(widget, tk.Text):
+                widget.tag_add("sel", "1.0", "end-1c")
+            else:
+                widget.select_range(0, "end")
+                widget.icursor("end")
+
+        def select_all_shortcut(event):
+            select_all(event.widget)
+            return "break"
+
+        def control_key(event):
+            if event.keysym.lower() in ("v", "c", "x", "a"):
+                return None
+            if sys.platform != "win32":
+                return None
+            virtual = {
+                86: "<<Paste>>",
+                67: "<<Copy>>",
+                88: "<<Cut>>",
+                65: "select_all",
+            }.get(event.keycode)
+            if virtual == "select_all":
+                select_all(event.widget)
+                return "break"
+            if virtual:
+                event.widget.event_generate(virtual)
+                return "break"
+            return None
+
+        def show_context_menu(event):
+            widget = event.widget
+            menu = tk.Menu(widget, tearoff=0)
+
+            def generate_virtual(sequence):
+                widget.focus_set()
+                widget.event_generate(sequence)
+
+            menu.add_command(label="ตัด", command=lambda: generate_virtual("<<Cut>>"))
+            menu.add_command(label="คัดลอก", command=lambda: generate_virtual("<<Copy>>"))
+            menu.add_command(label="วาง", command=lambda: generate_virtual("<<Paste>>"))
+            menu.add_command(label="เลือกทั้งหมด", command=lambda: select_all(widget))
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+            return "break"
+
+        for cls in ("TEntry", "Entry", "Text"):
+            self.root.bind_class(cls, "<Control-KeyPress>", control_key)
+            self.root.bind_class(cls, "<Control-a>", select_all_shortcut)
+            self.root.bind_class(cls, "<Control-A>", select_all_shortcut)
+            self.root.bind_class(cls, "<Button-3>", show_context_menu)
 
     def log(self, message):
         self.events.put(("log", str(message)))
