@@ -461,8 +461,13 @@ class DotaNotifyApp:
         try:
             updated_cfg = replace(self.cfg, **settings)
             core.save_config(updated_cfg)
-            for name, value in settings.items():
-                setattr(self.cfg, name, value)
+            self.cfg.my_account_id = updated_cfg.my_account_id
+            self.cfg.line_channel_token = updated_cfg.line_channel_token
+            self.cfg.line_user_id = updated_cfg.line_user_id
+            self.cfg.check_interval_min = updated_cfg.check_interval_min
+            self.cfg.gsi_port = updated_cfg.gsi_port
+            self.cfg.gsi_token = updated_cfg.gsi_token
+            self.cfg.auto_start = updated_cfg.auto_start
             if show_message:
                 messagebox.showinfo("บันทึกแล้ว", "บันทึกการตั้งค่าเรียบร้อย")
             return True
