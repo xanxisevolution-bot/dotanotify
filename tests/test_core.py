@@ -374,3 +374,162 @@ def test_monitor_restart_exits_old_loop_thread():
         release_first_check.set()
         monitor.stop()
         monitor._thread.join(timeout=1)
+
+
+def test_account_ids_splits_and_deduplicates_preserving_order():
+    assert core.account_ids("123, 456;789 123") == ["123", "456", "789"]
+    assert core.account_ids(None) == []
+
+
+def test_parse_settings_normalizes_multiple_account_ids():
+    values = {
+        "my_account_id": "123,456",
+        "line_channel_token": "",
+        "line_user_id": "",
+        "check_interval_min": 5,
+        "gsi_port": 3001,
+        "gsi_token": "secure-token",
+        "auto_start": False,
+    }
+
+    assert core.parse_settings(values)["my_account_id"] == "123, 456"
+
+    values["my_account_id"] = "123, abc"
+    with pytest.raises(
+        ValueError,
+        match="My Steam32 Account ID ต้องเป็นตัวเลข หลายบัญชีให้คั่นด้วยจุลภาค",
+    ):
+        core.parse_settings(values)
+
+
+def test_check_all_accounts_baselines_each_account_and_prefixes_logs(monkeypatch):
+    calls = []
+    responses = {
+        "/players/1/matches?": [{"match_id": 11}],
+        "/players/2/matches?": [{"match_id": 22}],
+    }
+
+    def fake_api_get(url):
+        calls.append(url)
+        return next(value for key, value in responses.items() if key in url)
+
+    monkeypatch.setattr(core, "api_get", fake_api_get)
+    logs = []
+    alerts, state = core.check_all_accounts(
+        SimpleNamespace(my_account_id="1, 2"),
+        {"players": [{"account_id": 3}]},
+        {},
+        {},
+        logs.append,
+        sleep=lambda _: None,
+    )
+
+    assert alerts == []
+    assert set(state["accounts"]) == {"1", "2"}
+    assert state["accounts"]["1"]["last_match_id"] == 11
+    assert state["accounts"]["2"]["last_match_id"] == 22
+    assert state["accounts"]["1"]["account_id"] == "1"
+    assert state["accounts"]["2"]["account_id"] == "2"
+    assert len(calls) == 2
+    assert any(message.startswith("[1]") for message in logs)
+    assert any(message.startswith("[2]") for message in logs)
+
+
+def test_check_all_accounts_migrates_legacy_state_and_skips_own_watchlist_ids(
+    monkeypatch,
+):
+    def fake_api_get(url):
+        if "/players/1/matches?" in url:
+            return [{"match_id": 10}, {"match_id": 11}]
+        if url.endswith("/matches/11"):
+            return {
+                "start_time": 1710000000,
+                "radiant_win": True,
+                "players": [
+                    {"account_id": 1, "player_slot": 0},
+                    {"account_id": 2, "player_slot": 128, "personaname": "Own Alt"},
+                    {
+                        "account_id": 3,
+                        "player_slot": 1,
+                        "personaname": "Other Player",
+                        "hero_id": 7,
+                    },
+                ],
+            }
+        if "/players/2/matches?" in url:
+            return [{"match_id": 20}]
+        raise AssertionError(f"Unexpected API URL: {url}")
+
+    monkeypatch.setattr(core, "api_get", fake_api_get)
+    alerts, state = core.check_all_accounts(
+        SimpleNamespace(my_account_id="1, 2"),
+        {
+            "players": [
+                {"account_id": 2, "name": "Own Alt"},
+                {"account_id": 3, "name": "Watch Other"},
+            ]
+        },
+        {"last_match_id": 10, "account_id": "1", "failures": {}},
+        {"7": "Earthshaker"},
+        lambda _: None,
+        sleep=lambda _: None,
+    )
+
+    assert len(alerts) == 1
+    assert "Other Player" in alerts[0]
+    assert "Own Alt" not in alerts[0]
+    assert state["accounts"]["1"]["last_match_id"] == 11
+    assert state["accounts"]["2"]["last_match_id"] == 20
+
+
+def test_check_all_accounts_drops_removed_ids_and_continues_after_fetch_failure(
+    monkeypatch,
+):
+    calls = []
+
+    def fake_api_get(url):
+        calls.append(url)
+        if "/players/2/matches?" in url:
+            return None
+        if "/players/3/matches?" in url:
+            return [{"match_id": 33}]
+        raise AssertionError(f"Unexpected API URL: {url}")
+
+    monkeypatch.setattr(core, "api_get", fake_api_get)
+    logs = []
+    _, state = core.check_all_accounts(
+        SimpleNamespace(my_account_id="2 3"),
+        {"players": [{"account_id": 8}]},
+        {
+            "accounts": {
+                "1": {"last_match_id": 10, "account_id": "1", "failures": {}},
+                "2": {"last_match_id": 20, "account_id": "2", "failures": {}},
+            }
+        },
+        {},
+        logs.append,
+        sleep=lambda _: None,
+    )
+
+    assert len(calls) == 2
+    assert set(state["accounts"]) == {"2", "3"}
+    assert state["accounts"]["2"]["last_match_id"] == 20
+    assert state["accounts"]["3"]["last_match_id"] == 33
+    assert any(message.startswith("[2]") for message in logs)
+    assert any(message.startswith("[3]") for message in logs)
+
+
+def test_check_all_accounts_without_ids_logs_once():
+    logs = []
+
+    alerts, state = core.check_all_accounts(
+        SimpleNamespace(my_account_id=""),
+        {"players": [{"account_id": 8}]},
+        {},
+        {},
+        logs.append,
+    )
+
+    assert alerts == []
+    assert state == {"accounts": {}}
+    assert logs == ["ยังไม่ได้ตั้งค่า My Steam32 Account ID"]

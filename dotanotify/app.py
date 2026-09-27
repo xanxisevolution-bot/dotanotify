@@ -206,7 +206,7 @@ class DotaNotifyApp:
             "steam_api_key": tk.StringVar(value=self.cfg.steam_api_key),
         }
         labels = [
-            ("my_account_id", "My Steam32 Account ID"),
+            ("my_account_id", "My Steam32 Account ID (หลายบัญชีคั่นด้วย ,)"),
             ("line_channel_token", "LINE Channel Access Token"),
             ("line_user_id", "LINE User ID"),
             ("steam_api_key", "Steam Web API Key"),
@@ -229,7 +229,8 @@ class DotaNotifyApp:
         )
 
         help_text = (
-            "Steam32 Account ID: ดูตัวเลขหลัง /players/ ที่ opendota.com/players/<id>\n"
+            "Steam32 Account ID: ดูตัวเลขหลัง /players/ ที่ opendota.com/players/<id>; "
+            "หลายบัญชีคั่นด้วยจุลภาค (,)\n"
             "LINE: ใช้ Messaging API Channel Access Token และ Your User ID จาก "
             "Basic settings (ขึ้นต้นด้วย U)\n"
             "แจ้งเตือนทันที: ใช้ Steam Web API Key จาก steamcommunity.com/dev/apikey "

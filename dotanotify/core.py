@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import shutil
 import sys
@@ -28,6 +29,17 @@ class Config:
     steam_api_key: str = ""
 
 
+def account_ids(value) -> list[str]:
+    ids = []
+    seen = set()
+    for account_id in re.split(r"[,;\s]+", str(value or "")):
+        account_id = account_id.strip()
+        if account_id and account_id not in seen:
+            ids.append(account_id)
+            seen.add(account_id)
+    return ids
+
+
 def parse_settings(values):
     try:
         check_interval_min = int(values["check_interval_min"])
@@ -43,9 +55,12 @@ def parse_settings(values):
     if not 1 <= gsi_port <= 65535:
         raise ValueError("GSI Port ต้องอยู่ระหว่าง 1–65535")
 
-    my_account_id = str(values["my_account_id"]).strip()
-    if my_account_id and not my_account_id.isdigit():
-        raise ValueError("My Steam32 Account ID ต้องเว้นว่างหรือเป็นตัวเลข")
+    my_account_ids = account_ids(values.get("my_account_id"))
+    if any(not account_id.isdigit() for account_id in my_account_ids):
+        raise ValueError(
+            "My Steam32 Account ID ต้องเป็นตัวเลข หลายบัญชีให้คั่นด้วยจุลภาค (,)"
+        )
+    my_account_id = ", ".join(my_account_ids)
     gsi_token = str(values["gsi_token"]).strip()
     if not gsi_token:
         raise ValueError("GSI Token ต้องไม่เว้นว่าง")
@@ -259,9 +274,15 @@ def build_live_alert(match_id, player_name, watched_info, hero_name, relation, n
     )
 
 
-def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None, deliver=None):
+def check_recent_matches(
+    cfg, watchlist, state, heroes, log, sleep=None, deliver=None, account_id=None
+):
     sleep = sleep or time.sleep
     deliver = deliver or (lambda alert: True)
+    account_id = str(
+        cfg.my_account_id if account_id is None else account_id
+    ).strip()
+    own_account_ids = set(account_ids(cfg.my_account_id))
     alerts = []
     state = state if isinstance(state, dict) else {}
     failures = state.get("failures")
@@ -270,7 +291,7 @@ def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None, deliver
         "account_id": str(state.get("account_id", "")),
         "failures": dict(failures) if isinstance(failures, dict) else {},
     }
-    if not cfg.my_account_id:
+    if not account_id:
         log("ยังไม่ได้ตั้งค่า My Steam32 Account ID")
         return alerts, new_state
     players = watchlist.get("players", [])
@@ -280,7 +301,7 @@ def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None, deliver
         return alerts, new_state
 
     matches = api_get(
-        f"{OPENDOTA}/players/{cfg.my_account_id}/matches?limit={MATCH_LIMIT}"
+        f"{OPENDOTA}/players/{account_id}/matches?limit={MATCH_LIMIT}"
     )
     if not matches:
         log("ไม่สามารถดึงข้อมูลแมทช์ได้")
@@ -288,7 +309,7 @@ def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None, deliver
 
     last_id = new_state["last_match_id"]
     newest_id = max(match["match_id"] for match in matches)
-    current_account_id = str(cfg.my_account_id)
+    current_account_id = account_id
     if new_state["account_id"] != current_account_id or last_id == 0:
         new_state["last_match_id"] = newest_id
         new_state["account_id"] = current_account_id
@@ -335,12 +356,12 @@ def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None, deliver
         players = details.get("players", [])
         my_team = None
         for player in players:
-            if str(player.get("account_id")) == str(cfg.my_account_id):
+            if str(player.get("account_id")) == account_id:
                 my_team = "radiant" if player.get("player_slot", 0) < 128 else "dire"
                 break
         for player in players:
             player_id = str(player.get("account_id", ""))
-            if player_id not in watched:
+            if player_id not in watched or player_id in own_account_ids:
                 continue
             alert = build_match_alert(
                 match_id=match_id,
@@ -378,6 +399,42 @@ def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None, deliver
     if not alerts:
         log("ไม่พบผู้เล่นใน Watchlist ในแมทช์ใหม่")
     return alerts, new_state
+
+
+def check_all_accounts(cfg, watchlist, state, heroes, log, sleep=None, deliver=None):
+    configured_ids = account_ids(cfg.my_account_id)
+    if not configured_ids:
+        log("ยังไม่ได้ตั้งค่า My Steam32 Account ID")
+        return [], {"accounts": {}}
+
+    state = state if isinstance(state, dict) else {}
+    if isinstance(state.get("accounts"), dict):
+        account_states = state["accounts"]
+    elif state.get("account_id"):
+        legacy_account_id = str(state["account_id"])
+        account_states = {legacy_account_id: state}
+    else:
+        account_states = {}
+
+    alerts = []
+    new_accounts = {}
+    for account_id in configured_ids:
+        account_log = log
+        if len(configured_ids) > 1:
+            account_log = lambda message, aid=account_id: log(f"[{aid}] {message}")
+        account_alerts, account_state = check_recent_matches(
+            cfg,
+            watchlist,
+            account_states.get(account_id, {"last_match_id": 0}),
+            heroes,
+            account_log,
+            sleep=sleep,
+            deliver=deliver,
+            account_id=account_id,
+        )
+        alerts.extend(account_alerts)
+        new_accounts[account_id] = account_state
+    return alerts, {"accounts": new_accounts}
 
 
 class Monitor:
@@ -423,7 +480,7 @@ class Monitor:
             with self._check_lock:
                 state_path = _data_file("state.json")
                 state = load_json(state_path, {"last_match_id": 0})
-                _, new_state = check_recent_matches(
+                _, new_state = check_all_accounts(
                     self.cfg,
                     self.get_watchlist(),
                     state,

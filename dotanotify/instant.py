@@ -75,6 +75,7 @@ def find_watched_in_realtime(
     stats, watched, my_account_id, heroes, now=None
 ) -> list[tuple[str, str]]:
     watched_by_id = _players_by_id(watched)
+    own = set(core.account_ids(my_account_id))
     teams = stats.get("teams", []) if isinstance(stats, dict) else []
     players = []
     my_team = None
@@ -86,13 +87,15 @@ def find_watched_in_realtime(
                 continue
             team_number = player.get("team", team_data.get("team_number"))
             players.append((player, team_number))
-            if str(player.get("accountid", "")) == str(my_account_id):
-                my_team = team_number
+    for player, team_number in players:
+        if str(player.get("accountid", "")) in own:
+            my_team = team_number
+            break
 
     alerts = []
     for player, team_number in players:
         account_id = str(player.get("accountid", ""))
-        if not account_id or account_id == "0" or account_id == str(my_account_id):
+        if not account_id or account_id == "0" or account_id in own:
             continue
         watched_info = watched_by_id.get(account_id)
         if watched_info is None:

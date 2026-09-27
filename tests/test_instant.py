@@ -542,3 +542,44 @@ def test_instant_monitor_start_and_stop():
 
     assert not thread.is_alive()
     assert not monitor.is_running
+
+
+def test_find_watched_in_realtime_recognizes_any_configured_account_as_self():
+    stats = {
+        "match": {"match_id": 900},
+        "teams": [
+            {
+                "team_number": 2,
+                "players": [
+                    {"accountid": 400, "name": "Enemy", "team": 2, "heroid": 5}
+                ],
+            },
+            {
+                "team_number": 3,
+                "players": [
+                    {"accountid": 200, "name": "My Alt", "team": 3, "heroid": 1},
+                    {"accountid": 300, "name": "Teammate", "team": 3, "heroid": 0},
+                ],
+            },
+        ],
+    }
+
+    alerts = instant.find_watched_in_realtime(
+        stats,
+        {
+            "players": [
+                {"account_id": 200, "name": "Own Alt"},
+                {"account_id": 300, "name": "Watch Friend"},
+                {"account_id": 400, "name": "Watch Enemy"},
+            ]
+        },
+        "100, 200",
+        {"5": "Pudge"},
+        datetime(2026, 1, 2, 3, 4),
+    )
+
+    alerts_by_account = dict(alerts)
+    assert set(alerts_by_account) == {"300", "400"}
+    assert "เพื่อนร่วมทีม 🤝" in alerts_by_account["300"]
+    assert "ฝ่ายตรงข้าม ⚔️" in alerts_by_account["400"]
+    assert "My Alt" not in "\n".join(alert for _account_id, alert in alerts)
