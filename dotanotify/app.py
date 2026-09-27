@@ -6,6 +6,7 @@ import sys
 import threading
 import tkinter as tk
 import webbrowser
+from dataclasses import replace
 from datetime import datetime, timezone
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
@@ -262,7 +263,8 @@ class DotaNotifyApp:
             self.gsi_button.configure(text="เปิด Live GSI")
             self.log("ปิด Live GSI แล้ว")
             return
-        self.save_settings(show_message=False)
+        if not self.save_settings(show_message=False):
+            return
         try:
             self.gsi_server = GSIServer(
                 self.cfg.gsi_port,
@@ -279,10 +281,7 @@ class DotaNotifyApp:
             messagebox.showerror("เปิด Live GSI ไม่สำเร็จ", str(error))
 
     def _send_live_alert(self, alert):
-        ok, info = core.send_line(
-            self.cfg.line_channel_token, self.cfg.line_user_id, alert
-        )
-        self.log(info if ok else f"LINE: {info}")
+        return core.deliver_alert(self.cfg, alert, self.log)
 
     def _refresh_watchlist(self):
         for item in self.tree.get_children():
@@ -450,24 +449,24 @@ class DotaNotifyApp:
 
     def save_settings(self, show_message=True):
         try:
-            self.cfg.my_account_id = self.setting_vars["my_account_id"].get().strip()
-            self.cfg.line_channel_token = self.setting_vars["line_channel_token"].get().strip()
-            self.cfg.line_user_id = self.setting_vars["line_user_id"].get().strip()
-            self.cfg.check_interval_min = int(
-                self.setting_vars["check_interval_min"].get()
-            )
-            self.cfg.gsi_port = int(self.setting_vars["gsi_port"].get())
-            self.cfg.gsi_token = self.setting_vars["gsi_token"].get().strip()
-            self.cfg.auto_start = bool(self.setting_vars["auto_start"].get())
-            if not 1 <= self.cfg.check_interval_min <= 120:
-                raise ValueError("ช่วงเวลาเช็คต้องอยู่ระหว่าง 1–120 นาที")
-            if not 1 <= self.cfg.gsi_port <= 65535:
-                raise ValueError("GSI Port ต้องอยู่ระหว่าง 1–65535")
-            core.save_config(self.cfg)
+            values = {
+                name: variable.get()
+                for name, variable in self.setting_vars.items()
+            }
+            settings = core.parse_settings(values)
+        except (ValueError, tk.TclError) as error:
+            messagebox.showerror("การตั้งค่าไม่ถูกต้อง", str(error))
+            return False
+
+        try:
+            updated_cfg = replace(self.cfg, **settings)
+            core.save_config(updated_cfg)
+            for name, value in settings.items():
+                setattr(self.cfg, name, value)
             if show_message:
                 messagebox.showinfo("บันทึกแล้ว", "บันทึกการตั้งค่าเรียบร้อย")
             return True
-        except (ValueError, tk.TclError) as error:
+        except OSError as error:
             messagebox.showerror("การตั้งค่าไม่ถูกต้อง", str(error))
             return False
 

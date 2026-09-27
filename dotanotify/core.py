@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import shutil
 import sys
 import threading
@@ -22,8 +23,41 @@ class Config:
     line_user_id: str = ""
     check_interval_min: int = 5
     gsi_port: int = 3001
-    gsi_token: str = "dota_watchlist_secret"
+    gsi_token: str = ""
     auto_start: bool = False
+
+
+def parse_settings(values):
+    try:
+        check_interval_min = int(values["check_interval_min"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("ช่วงเวลาเช็คต้องเป็นตัวเลขระหว่าง 1–120 นาที")
+    if not 1 <= check_interval_min <= 120:
+        raise ValueError("ช่วงเวลาเช็คต้องอยู่ระหว่าง 1–120 นาที")
+
+    try:
+        gsi_port = int(values["gsi_port"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("GSI Port ต้องเป็นตัวเลขระหว่าง 1–65535")
+    if not 1 <= gsi_port <= 65535:
+        raise ValueError("GSI Port ต้องอยู่ระหว่าง 1–65535")
+
+    my_account_id = str(values["my_account_id"]).strip()
+    if my_account_id and not my_account_id.isdigit():
+        raise ValueError("My Steam32 Account ID ต้องเว้นว่างหรือเป็นตัวเลข")
+    gsi_token = str(values["gsi_token"]).strip()
+    if not gsi_token:
+        raise ValueError("GSI Token ต้องไม่เว้นว่าง")
+
+    return {
+        "my_account_id": my_account_id,
+        "line_channel_token": str(values["line_channel_token"]).strip(),
+        "line_user_id": str(values["line_user_id"]).strip(),
+        "check_interval_min": check_interval_min,
+        "gsi_port": gsi_port,
+        "gsi_token": gsi_token,
+        "auto_start": bool(values["auto_start"]),
+    }
 
 
 def data_dir():
@@ -62,7 +96,11 @@ def load_config():
     if not isinstance(values, dict):
         values = {}
     known = {field.name for field in fields(Config)}
-    return Config(**{key: value for key, value in values.items() if key in known})
+    cfg = Config(**{key: value for key, value in values.items() if key in known})
+    if not cfg.gsi_token or cfg.gsi_token == "dota_watchlist_secret":
+        cfg.gsi_token = secrets.token_urlsafe(16)
+        save_config(cfg)
+    return cfg
 
 
 def save_config(cfg):
@@ -150,6 +188,15 @@ def send_line(token, user_id, message):
         return False, f"ส่ง LINE ไม่สำเร็จ: {error}"
 
 
+def deliver_alert(cfg, alert, log):
+    if not cfg.line_channel_token or not cfg.line_user_id:
+        log(f"[ไม่ได้ตั้งค่า LINE] {alert}")
+        return True
+    ok, info = send_line(cfg.line_channel_token, cfg.line_user_id, alert)
+    log(info)
+    return ok
+
+
 def build_match_alert(match_id, player, watched_info, heroes, my_team, radiant_win, start_ts):
     slot = player.get("player_slot", 0)
     their_team = "radiant" if slot < 128 else "dire"
@@ -210,10 +257,17 @@ def build_live_alert(match_id, player_name, watched_info, hero_name, relation, n
     )
 
 
-def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None):
+def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None, deliver=None):
     sleep = sleep or time.sleep
+    deliver = deliver or (lambda alert: True)
     alerts = []
-    new_state = dict(state)
+    state = state if isinstance(state, dict) else {}
+    failures = state.get("failures")
+    new_state = {
+        "last_match_id": state.get("last_match_id", 0),
+        "account_id": str(state.get("account_id", "")),
+        "failures": dict(failures) if isinstance(failures, dict) else {},
+    }
     if not cfg.my_account_id:
         log("ยังไม่ได้ตั้งค่า My Steam32 Account ID")
         return alerts, new_state
@@ -230,27 +284,52 @@ def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None):
         log("ไม่สามารถดึงข้อมูลแมทช์ได้")
         return alerts, new_state
 
-    last_id = state.get("last_match_id", 0)
+    last_id = new_state["last_match_id"]
     newest_id = max(match["match_id"] for match in matches)
-    if last_id == 0:
+    current_account_id = str(cfg.my_account_id)
+    if new_state["account_id"] != current_account_id or last_id == 0:
         new_state["last_match_id"] = newest_id
+        new_state["account_id"] = current_account_id
+        new_state["failures"] = {}
         log(f"ตั้งค่าแมทช์ล่าสุดเป็นจุดเริ่มต้นแล้ว (Match ID: {newest_id})")
         return alerts, new_state
 
+    new_state["account_id"] = current_account_id
+    failures = new_state["failures"]
     new_matches = [match for match in matches if match["match_id"] > last_id]
     if not new_matches:
         log("ไม่พบแมทช์ใหม่")
         return alerts, new_state
 
     log(f"พบ {len(new_matches)} แมทช์ใหม่ กำลังตรวจสอบ")
+
+    def record_failure(match_id, message):
+        key = str(match_id)
+        try:
+            count = int(failures.get(key, 0)) + 1
+        except (TypeError, ValueError):
+            count = 1
+        failures[key] = count
+        if count >= 3:
+            log(f"{message}; ข้ามแมทช์หลังลอง 3 ครั้ง")
+            failures.pop(key, None)
+            new_state["last_match_id"] = match_id
+            return True
+        log(f"{message} (ครั้งที่ {count}/3) จะลองใหม่ครั้งถัดไป")
+        return False
+
     for match in sorted(new_matches, key=lambda item: item["match_id"]):
         match_id = match["match_id"]
         sleep(1)
         details = api_get(f"{OPENDOTA}/matches/{match_id}")
         if not details:
-            log(f"ไม่สามารถดึงรายละเอียดแมทช์ {match_id} ได้")
-            continue
+            if record_failure(
+                match_id, f"ไม่สามารถดึงรายละเอียดแมทช์ {match_id} ได้"
+            ):
+                continue
+            break
 
+        match_alerts = []
         players = details.get("players", [])
         my_team = None
         for player in players:
@@ -261,19 +340,39 @@ def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None):
             player_id = str(player.get("account_id", ""))
             if player_id not in watched:
                 continue
-            alerts.append(
-                build_match_alert(
-                    match_id=match_id,
-                    player=player,
-                    watched_info=watched[player_id],
-                    heroes=heroes,
-                    my_team=my_team,
-                    radiant_win=details.get("radiant_win"),
-                    start_ts=details.get("start_time", 0),
-                )
+            alert = build_match_alert(
+                match_id=match_id,
+                player=player,
+                watched_info=watched[player_id],
+                heroes=heroes,
+                my_team=my_team,
+                radiant_win=details.get("radiant_win"),
+                start_ts=details.get("start_time", 0),
             )
-    new_state["last_match_id"] = max(match["match_id"] for match in new_matches)
-    log(f"อัปเดต Match ID ล่าสุดเป็น {new_state['last_match_id']}")
+            alerts.append(alert)
+            match_alerts.append(alert)
+
+        delivery_failed = False
+        for alert in match_alerts:
+            try:
+                delivered = deliver(alert)
+            except Exception as error:
+                log(f"ส่งการแจ้งเตือนแมทช์ {match_id} ไม่สำเร็จ: {error}")
+                delivered = False
+            if not delivered:
+                delivery_failed = True
+
+        if delivery_failed:
+            if record_failure(
+                match_id, f"ส่งการแจ้งเตือนแมทช์ {match_id} ไม่สำเร็จ"
+            ):
+                continue
+            break
+
+        new_state["last_match_id"] = match_id
+        failures.pop(str(match_id), None)
+    if new_state["last_match_id"] > last_id:
+        log(f"อัปเดต Match ID ล่าสุดเป็น {new_state['last_match_id']}")
     if not alerts:
         log("ไม่พบผู้เล่นใน Watchlist ในแมทช์ใหม่")
     return alerts, new_state
@@ -322,14 +421,14 @@ class Monitor:
             with self._check_lock:
                 state_path = _data_file("state.json")
                 state = load_json(state_path, {"last_match_id": 0})
-                alerts, new_state = check_recent_matches(
-                    self.cfg, self.get_watchlist(), state, load_heroes(), self.log
+                _, new_state = check_recent_matches(
+                    self.cfg,
+                    self.get_watchlist(),
+                    state,
+                    load_heroes() if self.cfg.my_account_id else {},
+                    self.log,
+                    deliver=lambda alert: deliver_alert(self.cfg, alert, self.log),
                 )
-                for alert in alerts:
-                    ok, info = send_line(
-                        self.cfg.line_channel_token, self.cfg.line_user_id, alert
-                    )
-                    self.log(info if ok else f"LINE: {info}")
                 save_json(state_path, new_state)
         except Exception as error:
             self.log(f"เกิดข้อผิดพลาดในการตรวจสอบ: {error}")

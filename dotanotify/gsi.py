@@ -3,6 +3,7 @@ import json
 import re
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -148,6 +149,8 @@ class GSIServer:
         self._thread = None
         self._alerted_match_id = None
         self._missing_allplayers_logged = set()
+        self._attempts = {}
+        self._last_attempt = {}
         self._last_game_state = None
         self._lock = threading.Lock()
 
@@ -162,25 +165,46 @@ class GSIServer:
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
+            timeout = 5
+
+            def _respond(self, status):
+                self.send_response(status)
+                self.end_headers()
+
             def do_POST(self):
                 try:
-                    length = int(self.headers.get("Content-Length", 0))
-                    data = json.loads(self.rfile.read(length))
-                    if data.get("auth", {}).get("token") != owner.token:
-                        self.send_response(403)
-                        self.end_headers()
+                    length = int(self.headers.get("Content-Length"))
+                except (TypeError, ValueError):
+                    self._respond(400)
+                    return
+                if length < 0:
+                    self._respond(400)
+                    return
+                if length > 1_048_576:
+                    self._respond(413)
+                    return
+                try:
+                    body = self.rfile.read(length)
+                    if len(body) != length:
+                        self._respond(400)
                         return
+                    data = json.loads(body)
+                except (OSError, ValueError, UnicodeDecodeError):
+                    self._respond(400)
+                    return
+                if not isinstance(data, dict):
+                    self._respond(400)
+                    return
+                auth = data.get("auth")
+                if not isinstance(auth, dict) or auth.get("token") != owner.token:
+                    self._respond(403)
+                    return
 
-                    self.send_response(200)
-                    self.end_headers()
+                self._respond(200)
+                try:
                     owner._process(data)
                 except Exception as error:
                     owner.log(f"GSI error: {error}")
-                    try:
-                        self.send_response(500)
-                        self.end_headers()
-                    except OSError:
-                        pass
 
             def log_message(self, format, *args):
                 return
@@ -228,15 +252,51 @@ class GSIServer:
                         "— ใช้เช็คอัตโนมัติหลังจบแมทช์แทน"
                     )
                 return
+            now = time.monotonic()
+            last_attempt = self._last_attempt.get(match_id)
+            if last_attempt is not None and now - last_attempt < 30:
+                return
+            self._last_attempt[match_id] = now
             alerts = find_watched_players(
                 data, self.get_watchlist(), load_heroes()
             )
-            self._alerted_match_id = match_id
             self._missing_allplayers_logged.discard(match_id)
+            if not alerts:
+                self._alerted_match_id = match_id
+                self._attempts.pop(match_id, None)
+                self._last_attempt.pop(match_id, None)
+                self.log(f"Match {match_id} — no watchlisted players found")
+                return
 
-        if alerts:
+            delivery_failed = False
             for alert in alerts:
-                self.on_alert(alert)
+                try:
+                    delivered = self.on_alert(alert)
+                except Exception as error:
+                    self.log(f"GSI alert delivery failed: {error}")
+                    delivered = False
+                if not delivered:
+                    delivery_failed = True
+
+            if delivery_failed:
+                attempt = self._attempts.get(match_id, 0) + 1
+                self._attempts[match_id] = attempt
+                if attempt >= 3:
+                    self._alerted_match_id = match_id
+                    self._attempts.pop(match_id, None)
+                    self._last_attempt.pop(match_id, None)
+                    self.log(
+                        f"Live alert delivery failed 3 times for match {match_id}; "
+                        "marking it handled"
+                    )
+                else:
+                    self.log(
+                        f"Live alert delivery failed for match {match_id} "
+                        f"({attempt}/3)"
+                    )
+                return
+
+            self._alerted_match_id = match_id
+            self._attempts.pop(match_id, None)
+            self._last_attempt.pop(match_id, None)
             self.log(f"Sent {len(alerts)} live alert(s) for match {match_id}")
-        else:
-            self.log(f"Match {match_id} — no watchlisted players found")

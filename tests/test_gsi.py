@@ -1,3 +1,4 @@
+import http.client
 import json
 import socket
 import threading
@@ -59,7 +60,11 @@ def test_server_rejects_bad_token_and_deduplicates_match(monkeypatch):
     alerts = []
     logs = []
     monkeypatch.setattr(gsi, "load_heroes", lambda: {"7": "Earthshaker"})
-    server = gsi.GSIServer(port, "secret", lambda: watched, alerts.append, logs.append)
+    def record_alert(alert):
+        alerts.append(alert)
+        return True
+
+    server = gsi.GSIServer(port, "secret", lambda: watched, record_alert, logs.append)
     server.start()
     try:
         payload = sample_gsi()
@@ -107,6 +112,89 @@ def test_server_rejects_bad_token_and_deduplicates_match(monkeypatch):
         while not alerts and time.time() < deadline:
             threading.Event().wait(0.01)
         assert len(alerts) == 1
+    finally:
+        server.stop()
+
+
+def test_server_throttles_and_retries_failed_alerts(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(gsi.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(gsi, "load_heroes", lambda: {"7": "Earthshaker"})
+    calls = []
+    results = iter([False, True])
+    watched = [{"account_id": 10, "name": "Friend", "tag": "", "note": "-"}]
+    server = gsi.GSIServer(
+        0,
+        "secret",
+        lambda: watched,
+        lambda alert: (calls.append(alert), next(results))[1],
+        lambda _: None,
+    )
+    payload = sample_gsi()
+    payload["allplayers"] = {"0": sample_gsi()["allplayers"]["0"]}
+
+    server._process(payload)
+    server._process(payload)
+    assert len(calls) == 1
+    assert server._alerted_match_id is None
+
+    clock[0] += 31
+    server._process(payload)
+    assert len(calls) == 2
+    assert server._alerted_match_id == 12345
+    server._process(payload)
+    assert len(calls) == 2
+
+
+def test_server_marks_match_handled_after_three_failed_deliveries(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(gsi.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(gsi, "load_heroes", lambda: {"7": "Earthshaker"})
+    calls = []
+    watched = [{"account_id": 10, "name": "Friend", "tag": "", "note": "-"}]
+    server = gsi.GSIServer(
+        0,
+        "secret",
+        lambda: watched,
+        lambda alert: (calls.append(alert), False)[1],
+        lambda _: None,
+    )
+    payload = sample_gsi()
+    payload["allplayers"] = {"0": sample_gsi()["allplayers"]["0"]}
+
+    for _ in range(3):
+        server._process(payload)
+        clock[0] += 31
+
+    assert len(calls) == 3
+    assert server._alerted_match_id == 12345
+    server._process(payload)
+    assert len(calls) == 3
+
+
+def test_server_rejects_invalid_and_oversized_content_length():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    server = gsi.GSIServer(port, "secret", lambda: [], lambda _: True, lambda _: None)
+    server.start()
+
+    def post_with_length(length):
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+        connection.putrequest("POST", "/")
+        connection.putheader("Content-Length", length)
+        connection.putheader("Content-Type", "application/json")
+        connection.endheaders()
+        response = connection.getresponse()
+        status = response.status
+        response.read()
+        connection.close()
+        return status
+
+    try:
+        assert post_with_length("invalid") == 400
+        assert post_with_length("-1") == 400
+        assert post_with_length("2000000") == 413
     finally:
         server.stop()
 
