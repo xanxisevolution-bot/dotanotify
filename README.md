@@ -1,5 +1,29 @@
 # 🛡️ Dota Watchlist — Player Tracker + Line Alerts
 
+## 🖥️ แอป DotaNotify.exe (แนะนำ)
+
+แอปเดียวสำหรับจัดการ Watchlist, เช็คแมทช์อัตโนมัติ และรับแจ้งเตือน LINE
+
+1. ดาวน์โหลด `DotaNotify.exe` จาก GitHub Actions artifact หรือหน้า Releases
+2. ในแท็บ **ตั้งค่า** กรอก Steam32 Account ID, LINE Channel Access Token, LINE User ID และ Steam Web API Key
+3. กด **บันทึก** — โปรแกรมจะเริ่มทำงานอัตโนมัติเมื่อมี Account ID
+4. เพิ่มผู้เล่นที่ต้องการติดตามในแท็บ **Watchlist**
+
+สามารถระบุ Steam32 Account ID ได้หลายบัญชี โดยคั่นด้วยจุลภาค เช่น `12345678, 87654321`
+
+ข้อมูลของแอปเก็บแยกจากไฟล์โปรแกรม: Windows ที่ `%APPDATA%\DotaNotify` และ Linux/macOS ที่ `~/.dotanotify`
+
+สร้างไฟล์ `.exe` เองบน Windows:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pyinstaller --noconfirm --onefile --windowed --name DotaNotify DotaNotify.py
+```
+
+### แจ้งเตือนทันทีระหว่าง Draft
+
+การแจ้งเตือนทันทีต้องใช้ **Steam Web API Key** จาก `steamcommunity.com/dev/apikey` (Domain: `localhost`) และใส่ `-condebug` ใน Launch Options ของ Dota 2 ที่ Steam > Dota 2 > Properties โปรแกรมจะเริ่มตรวจสอบพร้อมกับตัวเช็คแมทช์เมื่อเปิดใช้งาน ข้อมูลผู้เล่นจาก Steam อาจล่าช้าระหว่าง Draft
+
 ระบบติดตามผู้เล่น Dota 2 ที่ต้องการ และแจ้งเตือนผ่าน **Line Notify** เมื่อเจอผู้เล่นในแมทช์
 
 ---
