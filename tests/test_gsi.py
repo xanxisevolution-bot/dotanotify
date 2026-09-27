@@ -78,16 +78,31 @@ def test_server_rejects_bad_token_and_deduplicates_match(monkeypatch):
             assert error.code == 403
 
         payload["auth"] = {"token": "secret"}
-        body = json.dumps(payload).encode()
-        for _ in range(2):
+
+        def post(data):
             request = urllib.request.Request(
                 f"http://127.0.0.1:{port}/",
-                data=body,
+                data=json.dumps(data).encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
             with urllib.request.urlopen(request, timeout=3) as response:
                 assert response.status == 200
+
+        payload["allplayers"] = {}
+        post(payload)
+        post(payload)
+        deadline = time.time() + 2
+        while not any("Dota ไม่ส่งข้อมูล allplayers" in message for message in logs):
+            if time.time() >= deadline:
+                break
+            threading.Event().wait(0.01)
+        assert not alerts
+        assert sum("Dota ไม่ส่งข้อมูล allplayers" in message for message in logs) == 1
+
+        payload["allplayers"] = {"0": sample_gsi()["allplayers"]["0"]}
+        post(payload)
+        post(payload)
         deadline = time.time() + 2
         while not alerts and time.time() < deadline:
             threading.Event().wait(0.01)

@@ -17,7 +17,7 @@ from dotanotify.gsi import GSIServer, find_dota_cfg_dirs, install_gsi_cfg
 class DotaNotifyApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("🛡️ DotaNotify — Dota Watchlist")
+        self.root.title("DotaNotify — Dota Watchlist")
         self.root.geometry("900x620")
         self.root.minsize(820, 560)
         self.root.option_add("*Font", ("Tahoma", 10))
@@ -68,14 +68,14 @@ class DotaNotifyApp:
         buttons = ttk.Frame(self.home_tab)
         buttons.pack(fill="x", pady=(0, 12))
         self.monitor_button = ttk.Button(
-            buttons, text="▶ เริ่มเช็คอัตโนมัติ", command=self.toggle_monitor
+            buttons, text="เริ่มเช็คอัตโนมัติ", command=self.toggle_monitor
         )
         self.monitor_button.pack(side="left", padx=(0, 8))
-        ttk.Button(buttons, text="🔍 เช็คตอนนี้", command=self.monitor.check_now).pack(
+        ttk.Button(buttons, text="เช็คตอนนี้", command=self.monitor.check_now).pack(
             side="left", padx=4
         )
         self.gsi_button = ttk.Button(
-            buttons, text="📡 เปิด Live GSI", command=self.toggle_gsi
+            buttons, text="เปิด Live GSI", command=self.toggle_gsi
         )
         self.gsi_button.pack(side="left", padx=4)
 
@@ -136,19 +136,19 @@ class DotaNotifyApp:
 
         actions = ttk.Frame(self.watchlist_tab)
         actions.pack(fill="x", pady=(8, 0))
-        ttk.Button(actions, text="➕ เพิ่ม/อัปเดต", command=self.upsert_player).pack(
+        ttk.Button(actions, text="เพิ่ม/อัปเดต", command=self.upsert_player).pack(
             side="left", padx=3
         )
-        ttk.Button(actions, text="🗑 ลบ", command=self.delete_player).pack(
+        ttk.Button(actions, text="ลบ", command=self.delete_player).pack(
             side="left", padx=3
         )
-        ttk.Button(actions, text="📥 Import JSON", command=self.import_watchlist).pack(
+        ttk.Button(actions, text="Import JSON", command=self.import_watchlist).pack(
             side="left", padx=3
         )
-        ttk.Button(actions, text="📤 Export JSON", command=self.export_watchlist).pack(
+        ttk.Button(actions, text="Export JSON", command=self.export_watchlist).pack(
             side="left", padx=3
         )
-        ttk.Button(actions, text="🌐 เปิด OpenDota", command=self.open_opendota).pack(
+        ttk.Button(actions, text="เปิด OpenDota", command=self.open_opendota).pack(
             side="left", padx=3
         )
 
@@ -211,19 +211,19 @@ class DotaNotifyApp:
 
         actions = ttk.Frame(self.settings_tab)
         actions.pack(fill="x", pady=(8, 10))
-        ttk.Button(actions, text="💾 บันทึก", command=self.save_settings).pack(
+        ttk.Button(actions, text="บันทึก", command=self.save_settings).pack(
             side="left", padx=3
         )
-        ttk.Button(actions, text="📨 ทดสอบส่ง LINE", command=self.test_line).pack(
+        ttk.Button(actions, text="ทดสอบส่ง LINE", command=self.test_line).pack(
             side="left", padx=3
         )
         ttk.Button(
             actions,
-            text="⚙️ ติดตั้ง GSI config ให้ Dota 2",
+            text="ติดตั้ง GSI config ให้ Dota 2",
             command=self.install_gsi,
         ).pack(side="left", padx=3)
         ttk.Button(
-            actions, text="📂 เปิดโฟลเดอร์ข้อมูล", command=self.open_data_folder
+            actions, text="เปิดโฟลเดอร์ข้อมูล", command=self.open_data_folder
         ).pack(side="left", padx=3)
 
         help_text = (
@@ -242,7 +242,7 @@ class DotaNotifyApp:
         if self.monitor.is_running:
             self.monitor.stop()
             self.monitor_status.set("หยุด")
-            self.monitor_button.configure(text="▶ เริ่มเช็คอัตโนมัติ")
+            self.monitor_button.configure(text="เริ่มเช็คอัตโนมัติ")
             self.log("หยุดเช็คอัตโนมัติแล้ว")
         else:
             self.start_monitor()
@@ -259,7 +259,7 @@ class DotaNotifyApp:
             self.gsi_server.stop()
             self.gsi_server = None
             self.gsi_status.set("ปิด")
-            self.gsi_button.configure(text="📡 เปิด Live GSI")
+            self.gsi_button.configure(text="เปิด Live GSI")
             self.log("ปิด Live GSI แล้ว")
             return
         self.save_settings(show_message=False)
@@ -538,13 +538,16 @@ class DotaNotifyApp:
                 self.player_name_var.set(event[1])
                 self.log(f"ค้นหาผู้เล่นสำเร็จ: {event[1]}")
             elif event[0] == "dialog":
-                getattr(messagebox, "show" + event[1])(event[2], event[3])
+                if event[1] == "error":
+                    messagebox.showerror(event[2], event[3])
+                else:
+                    messagebox.showinfo(event[2], event[3])
         if self.monitor.is_running:
             self.monitor_status.set("กำลังทำงาน")
-            self.monitor_button.configure(text="⏹ หยุด")
+            self.monitor_button.configure(text="หยุด")
         else:
             self.monitor_status.set("หยุด")
-            self.monitor_button.configure(text="▶ เริ่มเช็คอัตโนมัติ")
+            self.monitor_button.configure(text="เริ่มเช็คอัตโนมัติ")
         if self.gsi_server and self.gsi_server.is_running:
             self.gsi_status.set(f"เปิด (Port {self.gsi_server.port})")
         self.root.after(200, self._drain_events)

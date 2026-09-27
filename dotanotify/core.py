@@ -214,6 +214,9 @@ def check_recent_matches(cfg, watchlist, state, heroes, log, sleep=None):
     sleep = sleep or time.sleep
     alerts = []
     new_state = dict(state)
+    if not cfg.my_account_id:
+        log("ยังไม่ได้ตั้งค่า My Steam32 Account ID")
+        return alerts, new_state
     players = watchlist.get("players", [])
     watched = {str(player["account_id"]): player for player in players if "account_id" in player}
     if not watched:
@@ -287,13 +290,23 @@ class Monitor:
 
     @property
     def is_running(self):
-        return self._thread is not None and self._thread.is_alive() and not self._stop_event.is_set()
+        return (
+            self._thread is not None
+            and self._thread.is_alive()
+            and not self._stop_event.is_set()
+        )
 
     def start(self):
         if self.is_running:
             return
-        self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True, name="DotaNotifyMonitor")
+        stop_event = threading.Event()
+        self._stop_event = stop_event
+        self._thread = threading.Thread(
+            target=self._run,
+            args=(stop_event,),
+            daemon=True,
+            name="DotaNotifyMonitor",
+        )
         self._thread.start()
 
     def stop(self):
@@ -321,8 +334,8 @@ class Monitor:
         except Exception as error:
             self.log(f"เกิดข้อผิดพลาดในการตรวจสอบ: {error}")
 
-    def _run(self):
-        while not self._stop_event.is_set():
+    def _run(self, stop_event):
+        while not stop_event.is_set():
             self._check_once()
-            if self._stop_event.wait(max(1, self.cfg.check_interval_min) * 60):
+            if stop_event.wait(max(1, self.cfg.check_interval_min) * 60):
                 break

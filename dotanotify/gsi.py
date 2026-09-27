@@ -147,6 +147,7 @@ class GSIServer:
         self._server = None
         self._thread = None
         self._alerted_match_id = None
+        self._missing_allplayers_logged = set()
         self._last_game_state = None
         self._lock = threading.Lock()
 
@@ -219,10 +220,19 @@ class GSIServer:
         with self._lock:
             if match_id == self._alerted_match_id:
                 return
+            if not data.get("allplayers"):
+                if match_id not in self._missing_allplayers_logged:
+                    self._missing_allplayers_logged.add(match_id)
+                    self.log(
+                        "Dota ไม่ส่งข้อมูล allplayers (มีให้เฉพาะตอนดู/spectate) "
+                        "— ใช้เช็คอัตโนมัติหลังจบแมทช์แทน"
+                    )
+                return
             alerts = find_watched_players(
                 data, self.get_watchlist(), load_heroes()
             )
             self._alerted_match_id = match_id
+            self._missing_allplayers_logged.discard(match_id)
 
         if alerts:
             for alert in alerts:

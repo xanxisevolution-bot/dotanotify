@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 
 from dotanotify import core
@@ -129,3 +130,65 @@ def test_empty_watchlist_does_not_fetch(monkeypatch):
     )
     assert alerts == []
     assert state == {"last_match_id": 0}
+
+
+def test_empty_account_id_does_not_fetch_and_logs(monkeypatch):
+    monkeypatch.setattr(
+        core, "api_get", lambda _: (_ for _ in ()).throw(AssertionError("network call"))
+    )
+    messages = []
+    state = {"last_match_id": 23}
+    alerts, new_state = core.check_recent_matches(
+        SimpleNamespace(my_account_id=""),
+        {"players": [{"account_id": 2}]},
+        state,
+        {},
+        messages.append,
+        sleep=lambda _: None,
+    )
+
+    assert alerts == []
+    assert new_state == state
+    assert "ยังไม่ได้ตั้งค่า My Steam32 Account ID" in messages
+
+
+def test_monitor_restart_exits_old_loop_thread():
+    monitor = core.Monitor(
+        SimpleNamespace(check_interval_min=60), lambda: {"players": []}, lambda _: None
+    )
+    first_check_started = threading.Event()
+    release_first_check = threading.Event()
+    second_check_started = threading.Event()
+    calls = []
+    calls_lock = threading.Lock()
+
+    def fake_check():
+        with calls_lock:
+            calls.append(threading.current_thread())
+            call_number = len(calls)
+        if call_number == 1:
+            first_check_started.set()
+            release_first_check.wait(2)
+        elif call_number == 2:
+            second_check_started.set()
+
+    monitor._check_once = fake_check
+    monitor.start()
+    old_thread = monitor._thread
+    try:
+        assert first_check_started.wait(1)
+        monitor.stop()
+        monitor.start()
+        current_thread = monitor._thread
+        assert second_check_started.wait(1)
+        release_first_check.set()
+        old_thread.join(timeout=1)
+
+        assert not old_thread.is_alive()
+        assert current_thread.is_alive()
+        assert len(calls) == 2
+        assert monitor.is_running
+    finally:
+        release_first_check.set()
+        monitor.stop()
+        monitor._thread.join(timeout=1)
