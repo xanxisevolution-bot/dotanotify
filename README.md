@@ -2,11 +2,12 @@
 
 ## 🖥️ แอป DotaNotify.exe (แนะนำ)
 
-แอปเดียวสำหรับจัดการ Watchlist, เช็คแมทช์อัตโนมัติ และรับแจ้งเตือน LINE พร้อม Live GSI
+แอปเดียวสำหรับจัดการ Watchlist, เช็คแมทช์อัตโนมัติ และรับแจ้งเตือน LINE
 
 1. ดาวน์โหลด `DotaNotify.exe` จาก GitHub Actions artifact หรือหน้า Releases
-2. เปิดโปรแกรม กรอกค่าในแท็บ **ตั้งค่า** และเพิ่มผู้เล่นในแท็บ **Watchlist**
-3. กด **เริ่มเช็คอัตโนมัติ** ในแท็บ **หน้าหลัก**
+2. ในแท็บ **ตั้งค่า** กรอก Steam32 Account ID, LINE Channel Access Token, LINE User ID และ Steam Web API Key
+3. กด **บันทึก** — โปรแกรมจะเริ่มทำงานอัตโนมัติเมื่อมี Account ID
+4. เพิ่มผู้เล่นที่ต้องการติดตามในแท็บ **Watchlist**
 
 ข้อมูลของแอปเก็บแยกจากไฟล์โปรแกรม: Windows ที่ `%APPDATA%\DotaNotify` และ Linux/macOS ที่ `~/.dotanotify`
 
@@ -19,7 +20,7 @@ pyinstaller --noconfirm --onefile --windowed --name DotaNotify DotaNotify.py
 
 ### แจ้งเตือนทันทีระหว่าง Draft
 
-กรอก **Steam Web API Key** จาก `steamcommunity.com/dev/apikey` (Domain ใส่ `localhost` ได้) แล้วเปิด **แจ้งเตือนทันที** ในแท็บหน้าหลัก โดยต้องใส่ `-condebug` ใน Launch Options ของ Dota 2 ที่ Steam > Dota 2 > Properties เพื่อให้แอปอ่าน `console.log` และค้นหารายชื่อผู้เล่นได้ตั้งแต่เริ่มแมทช์ ข้อมูลจาก Steam อาจมีความล่าช้าเล็กน้อยระหว่าง Draft
+การแจ้งเตือนทันทีต้องใช้ **Steam Web API Key** จาก `steamcommunity.com/dev/apikey` (Domain: `localhost`) และใส่ `-condebug` ใน Launch Options ของ Dota 2 ที่ Steam > Dota 2 > Properties โปรแกรมจะเริ่มตรวจสอบพร้อมกับตัวเช็คแมทช์เมื่อเปิดใช้งาน ข้อมูลผู้เล่นจาก Steam อาจล่าช้าระหว่าง Draft
 
 ระบบติดตามผู้เล่น Dota 2 ที่ต้องการ และแจ้งเตือนผ่าน **Line Notify** เมื่อเจอผู้เล่นในแมทช์
 
