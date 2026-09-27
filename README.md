@@ -1,5 +1,22 @@
 # 🛡️ Dota Watchlist — Player Tracker + Line Alerts
 
+## 🖥️ แอป DotaNotify.exe (แนะนำ)
+
+แอปเดียวสำหรับจัดการ Watchlist, เช็คแมทช์อัตโนมัติ และรับแจ้งเตือน LINE พร้อม Live GSI
+
+1. ดาวน์โหลด `DotaNotify.exe` จาก GitHub Actions artifact หรือหน้า Releases
+2. เปิดโปรแกรม กรอกค่าในแท็บ **ตั้งค่า** และเพิ่มผู้เล่นในแท็บ **Watchlist**
+3. กด **เริ่มเช็คอัตโนมัติ** ในแท็บ **หน้าหลัก**
+
+ข้อมูลของแอปเก็บแยกจากไฟล์โปรแกรม: Windows ที่ `%APPDATA%\DotaNotify` และ Linux/macOS ที่ `~/.dotanotify`
+
+สร้างไฟล์ `.exe` เองบน Windows:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pyinstaller --noconfirm --onefile --windowed --name DotaNotify DotaNotify.py
+```
+
 ระบบติดตามผู้เล่น Dota 2 ที่ต้องการ และแจ้งเตือนผ่าน **Line Notify** เมื่อเจอผู้เล่นในแมทช์
 
 ---
