@@ -144,14 +144,14 @@ def test_find_watched_in_realtime_formats_relations_and_skips_self():
         now,
     )
 
-    assert len(alerts) == 2
-    assert "Teammate" in alerts[0]
-    assert "เพื่อนร่วมทีม 🤝" in alerts[0]
-    assert "ยังไม่เลือกฮีโร่" in alerts[0]
-    assert "ฝ่ายตรงข้าม ⚔️" in alerts[1]
-    assert "Pudge" in alerts[1]
-    assert "789" in alerts[0]
-    assert "Self" not in "\n".join(alerts)
+    assert [account_id for account_id, _alert in alerts] == ["200", "300"]
+    assert "Teammate" in alerts[0][1]
+    assert "เพื่อนร่วมทีม 🤝" in alerts[0][1]
+    assert "ยังไม่เลือกฮีโร่" in alerts[0][1]
+    assert "ฝ่ายตรงข้าม ⚔️" in alerts[1][1]
+    assert "Pudge" in alerts[1][1]
+    assert "789" in alerts[0][1]
+    assert "Self" not in "\n".join(alert for _account_id, alert in alerts)
 
 
 def _stats_with_player(account_id=200):
@@ -168,16 +168,21 @@ def _stats_with_player(account_id=200):
     }
 
 
-def _make_monitor(path, fetch, clock, on_alert=None, logs=None):
+def _make_monitor(
+    path, fetch, clock, on_alert=None, logs=None, on_found=None, watchlist=None
+):
     log_messages = logs if logs is not None else []
     return instant.InstantMonitor(
         SimpleNamespace(steam_api_key="test-key", my_account_id="100"),
-        lambda: {"players": [{"account_id": 200, "name": "Watched"}]},
+        lambda: watchlist
+        if watchlist is not None
+        else {"players": [{"account_id": 200, "name": "Watched"}]},
         log_messages.append,
         on_alert or (lambda _alert: True),
         find_logs=[path],
         fetch=fetch,
         clock=clock,
+        on_found=on_found,
     )
 
 
@@ -240,7 +245,9 @@ def test_poll_retries_failed_alerts_without_resending_delivered_alerts(
 ):
     monkeypatch.setattr(instant.core, "load_heroes", lambda: {})
     monkeypatch.setattr(
-        instant, "find_watched_in_realtime", lambda *_args: ["alert A", "alert B"]
+        instant,
+        "find_watched_in_realtime",
+        lambda *_args: [("200", "alert A"), ("300", "alert B")],
     )
     path = tmp_path / "console.log"
     path.write_text("", encoding="utf-8")
@@ -267,6 +274,122 @@ def test_poll_retries_failed_alerts_without_resending_delivered_alerts(
     monitor.poll_once()
 
     assert delivered == ["alert A", "alert B", "alert A"]
+    assert monitor._handled
+
+
+def test_partial_failure_dedupes_delivered_id_when_hero_changes(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        instant.core, "load_heroes", lambda: {"1": "Axe", "2": "Pudge"}
+    )
+    original_find = instant.find_watched_in_realtime
+    alert_batches = []
+
+    def find_alerts(*args):
+        alerts = original_find(*args)
+        alert_batches.append(alerts)
+        return alerts
+
+    monkeypatch.setattr(instant, "find_watched_in_realtime", find_alerts)
+    path = tmp_path / "console.log"
+    path.write_text("", encoding="utf-8")
+    current_time = [0]
+    fetch_count = [0]
+    deliveries = []
+    player_two_results = iter([False, True])
+
+    def fetch(*_args):
+        fetch_count[0] += 1
+        first_hero = 0 if fetch_count[0] == 1 else 1
+        return {
+            "match": {"match_id": 1234},
+            "teams": [
+                {
+                    "team_number": 2,
+                    "players": [
+                        {"accountid": 100, "name": "Me", "team": 2, "heroid": 1}
+                    ],
+                },
+                {
+                    "team_number": 3,
+                    "players": [
+                        {
+                            "accountid": 200,
+                            "name": "Player One",
+                            "team": 3,
+                            "heroid": first_hero,
+                        },
+                        {
+                            "accountid": 300,
+                            "name": "Player Two",
+                            "team": 3,
+                            "heroid": 2,
+                        },
+                    ],
+                },
+            ],
+        }
+
+    def deliver(alert):
+        deliveries.append(alert)
+        if "Player One" in alert:
+            return True
+        return next(player_two_results)
+
+    monitor = _make_monitor(
+        path,
+        fetch,
+        lambda: current_time[0],
+        deliver,
+        watchlist={
+            "players": [
+                {"account_id": 200, "name": "Player One"},
+                {"account_id": 300, "name": "Player Two"},
+            ]
+        },
+    )
+    monitor.poll_once()
+    with path.open("a", encoding="utf-8") as console_log:
+        console_log.write(
+            f"server steamid:{instant.gameserver_steam_id(10, 1000)}\n"
+        )
+    monitor.poll_once()
+    current_time[0] = 10
+    monitor.poll_once()
+
+    assert [account_id for account_id, _alert in alert_batches[0]] == ["200", "300"]
+    assert "ยังไม่เลือกฮีโร่" in alert_batches[0][0][1]
+    assert "Axe" in alert_batches[1][0][1]
+    assert ["Player One" in alert for alert in deliveries] == [True, False, False]
+    assert ["Player Two" in alert for alert in deliveries] == [False, True, True]
+    assert monitor._handled
+
+
+def test_on_found_is_called_once_across_delivery_retries(tmp_path, monkeypatch):
+    monkeypatch.setattr(instant.core, "load_heroes", lambda: {})
+    path = tmp_path / "console.log"
+    path.write_text("", encoding="utf-8")
+    current_time = [0]
+    delivery_results = iter([False, True])
+    found_alerts = []
+    monitor = _make_monitor(
+        path,
+        lambda *_args: _stats_with_player(),
+        lambda: current_time[0],
+        lambda _alert: next(delivery_results),
+        on_found=found_alerts.append,
+    )
+    monitor.poll_once()
+    with path.open("a", encoding="utf-8") as console_log:
+        console_log.write(
+            f"server steamid:{instant.gameserver_steam_id(11, 1100)}\n"
+        )
+    monitor.poll_once()
+    current_time[0] = 10
+    monitor.poll_once()
+
+    assert len(found_alerts) == 1
+    assert len(found_alerts[0]) == 1
+    assert "Watched" in found_alerts[0][0]
     assert monitor._handled
 
 
@@ -298,7 +421,9 @@ def test_poll_times_out_when_players_never_arrive(tmp_path):
 
 def test_new_server_id_resets_retry_state(tmp_path, monkeypatch):
     monkeypatch.setattr(instant.core, "load_heroes", lambda: {})
-    monkeypatch.setattr(instant, "find_watched_in_realtime", lambda *_args: ["alert"])
+    monkeypatch.setattr(
+        instant, "find_watched_in_realtime", lambda *_args: [("200", "alert")]
+    )
     path = tmp_path / "console.log"
     path.write_text("", encoding="utf-8")
     current_time = [0]

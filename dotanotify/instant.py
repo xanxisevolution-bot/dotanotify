@@ -71,7 +71,9 @@ def check_steam_key(api_key):
         return False, f"ตรวจสอบ Steam API Key ไม่สำเร็จ: {error}"
 
 
-def find_watched_in_realtime(stats, watched, my_account_id, heroes, now=None):
+def find_watched_in_realtime(
+    stats, watched, my_account_id, heroes, now=None
+) -> list[tuple[str, str]]:
     watched_by_id = _players_by_id(watched)
     teams = stats.get("teams", []) if isinstance(stats, dict) else []
     players = []
@@ -116,13 +118,16 @@ def find_watched_in_realtime(stats, watched, my_account_id, heroes, now=None):
         )
         match_id = (stats.get("match") or {}).get("match_id", 0)
         alerts.append(
-            core.build_live_alert(
-                match_id,
-                player_name,
-                watched_info,
-                hero_name,
-                relation,
-                now or datetime.now(),
+            (
+                account_id,
+                core.build_live_alert(
+                    match_id,
+                    player_name,
+                    watched_info,
+                    hero_name,
+                    relation,
+                    now or datetime.now(),
+                ),
             )
         )
     return alerts
@@ -138,6 +143,7 @@ class InstantMonitor:
         find_logs=None,
         fetch=fetch_realtime_stats,
         clock=time.monotonic,
+        on_found=None,
     ):
         self.cfg = cfg
         self.get_watchlist = get_watchlist
@@ -150,6 +156,7 @@ class InstantMonitor:
         )
         self.fetch = fetch
         self.clock = clock
+        self.on_found = on_found
         self._stop_event = threading.Event()
         self._thread = None
         self._poll_lock = threading.Lock()
@@ -164,7 +171,8 @@ class InstantMonitor:
         self._attempts = 0
         self._started_at = None
         self._last_fetch = None
-        self._delivered_alerts = set()
+        self._delivered_ids = set()
+        self._found_notified = False
 
     @property
     def is_running(self):
@@ -217,7 +225,8 @@ class InstantMonitor:
                         self._attempts = 0
                         self._started_at = self.clock()
                         self._last_fetch = None
-                        self._delivered_alerts = set()
+                        self._delivered_ids = set()
+                        self._found_notified = False
                         self.log(
                             f"เจอเซิร์ฟเวอร์แมทช์ใหม่ ({server_id}) "
                             "กำลังดึงรายชื่อผู้เล่น"
@@ -308,9 +317,17 @@ class InstantMonitor:
             self.log("ไม่พบผู้เล่นใน Watchlist ในแมทช์นี้")
             return
 
+        if not self._found_notified:
+            self._found_notified = True
+            if self.on_found:
+                try:
+                    self.on_found([alert for _account_id, alert in alerts])
+                except Exception as error:
+                    self.log(f"แสดงการแจ้งเตือนผู้เล่นที่พบไม่สำเร็จ: {error}")
+
         delivery_failed = False
-        for alert in alerts:
-            if alert in self._delivered_alerts:
+        for account_id, alert in alerts:
+            if account_id in self._delivered_ids:
                 continue
             try:
                 delivered = self.on_alert(alert)
@@ -318,7 +335,7 @@ class InstantMonitor:
                 self.log(f"ส่งการแจ้งเตือนทันทีไม่สำเร็จ: {error}")
                 delivered = False
             if delivered:
-                self._delivered_alerts.add(alert)
+                self._delivered_ids.add(account_id)
             else:
                 delivery_failed = True
 

@@ -30,7 +30,11 @@ class DotaNotifyApp:
         self.watchlist = core.load_watchlist()
         self.monitor = core.Monitor(self.cfg, self.get_watchlist, self.log)
         self.instant_monitor = InstantMonitor(
-            self.cfg, self.get_watchlist, self.log, self._send_instant_alert
+            self.cfg,
+            self.get_watchlist,
+            self.log,
+            self._send_instant_alert,
+            on_found=self._instant_players_found,
         )
         self.gsi_server = None
         self._build_ui()
@@ -389,11 +393,12 @@ class DotaNotifyApp:
         self.log("เปิดแจ้งเตือนทันทีแล้ว")
 
     def _send_instant_alert(self, alert):
-        delivered = core.deliver_alert(self.cfg, alert, self.log)
+        return core.deliver_alert(self.cfg, alert, self.log)
+
+    def _instant_players_found(self, alerts):
         self.events.put(
-            ("dialog", "info", "เจอผู้เล่นใน Watchlist", alert)
+            ("dialog", "info", "เจอผู้เล่นใน Watchlist", "\n\n".join(alerts))
         )
-        return delivered
 
     def _refresh_watchlist(self):
         for item in self.tree.get_children():
