@@ -298,6 +298,7 @@ def test_parse_settings_validates_all_values():
         "check_interval_min": "10",
         "gsi_port": "3030",
         "gsi_token": "secure-token",
+        "steam_api_key": " steam-key ",
         "auto_start": True,
     }
     assert core.parse_settings(values) == {
@@ -308,10 +309,14 @@ def test_parse_settings_validates_all_values():
         "gsi_port": 3030,
         "gsi_token": "secure-token",
         "auto_start": True,
+        "steam_api_key": "steam-key",
     }
     empty_id = dict(values)
     empty_id["my_account_id"] = ""
     assert core.parse_settings(empty_id)["my_account_id"] == ""
+    legacy_values = dict(values)
+    legacy_values.pop("steam_api_key")
+    assert core.parse_settings(legacy_values)["steam_api_key"] == ""
 
     for key, value in (
         ("check_interval_min", "0"),

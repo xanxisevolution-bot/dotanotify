@@ -17,6 +17,10 @@ pip install -r requirements.txt -r requirements-dev.txt
 pyinstaller --noconfirm --onefile --windowed --name DotaNotify DotaNotify.py
 ```
 
+### แจ้งเตือนทันทีระหว่าง Draft
+
+กรอก **Steam Web API Key** จาก `steamcommunity.com/dev/apikey` (Domain ใส่ `localhost` ได้) แล้วเปิด **แจ้งเตือนทันที** ในแท็บหน้าหลัก โดยต้องใส่ `-condebug` ใน Launch Options ของ Dota 2 ที่ Steam > Dota 2 > Properties เพื่อให้แอปอ่าน `console.log` และค้นหารายชื่อผู้เล่นได้ตั้งแต่เริ่มแมทช์ ข้อมูลจาก Steam อาจมีความล่าช้าเล็กน้อยระหว่าง Draft
+
 ระบบติดตามผู้เล่น Dota 2 ที่ต้องการ และแจ้งเตือนผ่าน **Line Notify** เมื่อเจอผู้เล่นในแมทช์
 
 ---

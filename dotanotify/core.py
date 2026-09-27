@@ -25,6 +25,7 @@ class Config:
     gsi_port: int = 3001
     gsi_token: str = ""
     auto_start: bool = False
+    steam_api_key: str = ""
 
 
 def parse_settings(values):
@@ -57,6 +58,7 @@ def parse_settings(values):
         "gsi_port": gsi_port,
         "gsi_token": gsi_token,
         "auto_start": bool(values["auto_start"]),
+        "steam_api_key": str(values.get("steam_api_key", "")).strip(),
     }
 
 

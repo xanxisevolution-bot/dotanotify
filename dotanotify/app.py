@@ -13,6 +13,7 @@ from tkinter.scrolledtext import ScrolledText
 
 from dotanotify import core
 from dotanotify.gsi import GSIServer, find_dota_cfg_dirs, install_gsi_cfg
+from dotanotify.instant import InstantMonitor, check_steam_key
 
 
 class DotaNotifyApp:
@@ -28,6 +29,9 @@ class DotaNotifyApp:
         self.cfg = core.load_config()
         self.watchlist = core.load_watchlist()
         self.monitor = core.Monitor(self.cfg, self.get_watchlist, self.log)
+        self.instant_monitor = InstantMonitor(
+            self.cfg, self.get_watchlist, self.log, self._send_instant_alert
+        )
         self.gsi_server = None
         self._build_ui()
         self._refresh_watchlist()
@@ -35,6 +39,8 @@ class DotaNotifyApp:
         self.root.after(200, self._drain_events)
         if self.cfg.auto_start:
             self.start_monitor()
+            if self.cfg.steam_api_key:
+                self.start_instant_monitor()
 
     def _install_edit_bindings(self):
         def select_all(widget):
@@ -118,10 +124,13 @@ class DotaNotifyApp:
         status.pack(fill="x", pady=(0, 12))
         self.monitor_status = tk.StringVar(value="หยุด")
         self.gsi_status = tk.StringVar(value="ปิด")
+        self.instant_status = tk.StringVar(value="ปิด")
         ttk.Label(status, text="เช็คอัตโนมัติ:").pack(side="left")
         ttk.Label(status, textvariable=self.monitor_status).pack(side="left", padx=(4, 18))
         ttk.Label(status, text="Live GSI:").pack(side="left")
         ttk.Label(status, textvariable=self.gsi_status).pack(side="left", padx=4)
+        ttk.Label(status, text="แจ้งเตือนทันที:").pack(side="left", padx=(18, 0))
+        ttk.Label(status, textvariable=self.instant_status).pack(side="left", padx=4)
 
         buttons = ttk.Frame(self.home_tab)
         buttons.pack(fill="x", pady=(0, 12))
@@ -136,6 +145,10 @@ class DotaNotifyApp:
             buttons, text="เปิด Live GSI", command=self.toggle_gsi
         )
         self.gsi_button.pack(side="left", padx=4)
+        self.instant_button = ttk.Button(
+            buttons, text="เปิดแจ้งเตือนทันที", command=self.toggle_instant_alert
+        )
+        self.instant_button.pack(side="left", padx=4)
 
         ttk.Label(self.home_tab, text="บันทึกการทำงาน").pack(anchor="w")
         self.log_text = ScrolledText(self.home_tab, wrap="word", state="disabled")
@@ -221,6 +234,7 @@ class DotaNotifyApp:
             "gsi_port": tk.StringVar(value=str(self.cfg.gsi_port)),
             "gsi_token": tk.StringVar(value=self.cfg.gsi_token),
             "auto_start": tk.BooleanVar(value=self.cfg.auto_start),
+            "steam_api_key": tk.StringVar(value=self.cfg.steam_api_key),
         }
         labels = [
             ("my_account_id", "My Steam32 Account ID"),
@@ -229,8 +243,10 @@ class DotaNotifyApp:
             ("check_interval_min", "ช่วงเวลาเช็ค (นาที)"),
             ("gsi_port", "GSI Port"),
             ("gsi_token", "GSI Token"),
+            ("steam_api_key", "Steam Web API Key"),
         ]
         self.token_entry = None
+        self.steam_api_key_entry = None
         for row, (key, label) in enumerate(labels):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", padx=4, pady=5)
             if key == "check_interval_min":
@@ -254,6 +270,9 @@ class DotaNotifyApp:
                 if key == "line_channel_token":
                     widget.configure(show="•")
                     self.token_entry = widget
+                elif key == "steam_api_key":
+                    widget.configure(show="•")
+                    self.steam_api_key_entry = widget
             widget.grid(row=row, column=1, sticky="ew", padx=4, pady=5)
         ttk.Checkbutton(
             form,
@@ -276,6 +295,9 @@ class DotaNotifyApp:
             side="left", padx=3
         )
         ttk.Button(
+            actions, text="ทดสอบ Steam API Key", command=self.test_steam_api_key
+        ).pack(side="left", padx=3)
+        ttk.Button(
             actions,
             text="ติดตั้ง GSI config ให้ Dota 2",
             command=self.install_gsi,
@@ -290,7 +312,10 @@ class DotaNotifyApp:
             "LINE: สร้าง Messaging API Channel ใน LINE Developers แล้วใช้ Channel "
             "Access Token และ User ID ของผู้รับ\n"
             "หมายเหตุ: Live GSI จะส่งข้อมูล allplayers เมื่อกำลัง spectate/watch "
-            "เท่านั้น ไม่ส่งขณะเล่นเอง; การเช็คหลังจบแมทช์ใช้ได้ขณะเล่น"
+            "เท่านั้น ไม่ส่งขณะเล่นเอง; การเช็คหลังจบแมทช์ใช้ได้ขณะเล่น\n"
+            "แจ้งเตือนทันที: ขอ Steam Web API Key ที่ steamcommunity.com/dev/apikey "
+            "(Domain ใส่ localhost ได้) และใส่ -condebug ใน Launch Options ของ Dota 2 "
+            "(Steam > Dota 2 > Properties)"
         )
         ttk.Label(self.settings_tab, text=help_text, wraplength=840, justify="left").pack(
             anchor="w", pady=8
@@ -339,6 +364,36 @@ class DotaNotifyApp:
 
     def _send_live_alert(self, alert):
         return core.deliver_alert(self.cfg, alert, self.log)
+
+    def toggle_instant_alert(self):
+        if self.instant_monitor.is_running:
+            self.instant_monitor.stop()
+            self.instant_status.set("ปิด")
+            self.instant_button.configure(text="เปิดแจ้งเตือนทันที")
+            self.log("ปิดแจ้งเตือนทันทีแล้ว")
+            return
+        if not self.save_settings(show_message=False):
+            return
+        if not self.cfg.steam_api_key:
+            messagebox.showerror(
+                "เปิดแจ้งเตือนทันทีไม่สำเร็จ",
+                "กรุณากรอก Steam Web API Key ในแท็บตั้งค่าก่อน",
+            )
+            return
+        self.start_instant_monitor()
+
+    def start_instant_monitor(self):
+        self.instant_monitor.start()
+        self.instant_status.set("เปิด")
+        self.instant_button.configure(text="ปิดแจ้งเตือนทันที")
+        self.log("เปิดแจ้งเตือนทันทีแล้ว")
+
+    def _send_instant_alert(self, alert):
+        delivered = core.deliver_alert(self.cfg, alert, self.log)
+        self.events.put(
+            ("dialog", "info", "เจอผู้เล่นใน Watchlist", alert)
+        )
+        return delivered
 
     def _refresh_watchlist(self):
         for item in self.tree.get_children():
@@ -525,6 +580,7 @@ class DotaNotifyApp:
             self.cfg.gsi_port = updated_cfg.gsi_port
             self.cfg.gsi_token = updated_cfg.gsi_token
             self.cfg.auto_start = updated_cfg.auto_start
+            self.cfg.steam_api_key = updated_cfg.steam_api_key
             if show_message:
                 messagebox.showinfo("บันทึกแล้ว", "บันทึกการตั้งค่าเรียบร้อย")
             return True
@@ -551,6 +607,19 @@ class DotaNotifyApp:
             )
 
         threading.Thread(target=send_test, daemon=True).start()
+
+    def test_steam_api_key(self):
+        if not self.save_settings(show_message=False):
+            return
+        api_key = self.cfg.steam_api_key
+
+        def test_key():
+            ok, info = check_steam_key(api_key)
+            self.events.put(
+                ("dialog", "info" if ok else "error", "ทดสอบ Steam API Key", info)
+            )
+
+        threading.Thread(target=test_key, daemon=True).start()
 
     def install_gsi(self):
         if not self.save_settings(show_message=False):
@@ -599,6 +668,8 @@ class DotaNotifyApp:
                 self.player_name_var.set(event[1])
                 self.log(f"ค้นหาผู้เล่นสำเร็จ: {event[1]}")
             elif event[0] == "dialog":
+                if event[2] == "เจอผู้เล่นใน Watchlist":
+                    self.root.bell()
                 if event[1] == "error":
                     messagebox.showerror(event[2], event[3])
                 else:
@@ -611,10 +682,17 @@ class DotaNotifyApp:
             self.monitor_button.configure(text="เริ่มเช็คอัตโนมัติ")
         if self.gsi_server and self.gsi_server.is_running:
             self.gsi_status.set(f"เปิด (Port {self.gsi_server.port})")
+        if self.instant_monitor.is_running:
+            self.instant_status.set("เปิด")
+            self.instant_button.configure(text="ปิดแจ้งเตือนทันที")
+        else:
+            self.instant_status.set("ปิด")
+            self.instant_button.configure(text="เปิดแจ้งเตือนทันที")
         self.root.after(200, self._drain_events)
 
     def close(self):
         self.monitor.stop()
+        self.instant_monitor.stop()
         if self.gsi_server:
             self.gsi_server.stop()
         self.root.destroy()
