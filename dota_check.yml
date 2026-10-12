@@ -34,8 +34,8 @@ jobs:
       - name: Run Dota watchlist check
         env:
           MY_DOTA_ID:          ${{ secrets.MY_DOTA_ID }}
-          LINE_CHANNEL_TOKEN:  ${{ secrets.LINE_CHANNEL_TOKEN }}
-          LINE_USER_ID:        ${{ secrets.LINE_USER_ID }}
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python check_dota.py
 
       - name: Commit updated state

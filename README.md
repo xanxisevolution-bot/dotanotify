@@ -1,6 +1,6 @@
-# 🛡️ Dota Watchlist — Player Tracker + Line Alerts
+# 🛡️ Dota Watchlist — Player Tracker + Telegram Alerts
 
-ระบบติดตามผู้เล่น Dota 2 ที่ต้องการ และแจ้งเตือนผ่าน **Line Notify** เมื่อเจอผู้เล่นในแมทช์
+ระบบติดตามผู้เล่น Dota 2 ที่ต้องการ และแจ้งเตือนผ่าน **Telegram** เมื่อเจอผู้เล่นในแมทช์
 
 ---
 
@@ -40,16 +40,31 @@ git push origin main
 | Secret | ค่า |
 |--------|-----|
 | `MY_DOTA_ID` | Steam32 Account ID ของคุณ |
-| `LINE_TOKEN` | Line Notify Token |
+| `TELEGRAM_BOT_TOKEN` | Bot Token จาก @BotFather |
+| `TELEGRAM_CHAT_ID` | Chat ID ที่จะรับแจ้งเตือน |
 
 #### หา Steam32 Account ID
 1. เปิด OpenDota: `https://www.opendota.com/players/[SteamID64]`  
 2. ดูที่ URL — ตัวเลขหลัง `/players/` คือ Account ID
 
-#### ขอ Line Notify Token
-1. ไปที่ `https://notify-bot.line.me/`
-2. Login → My page → Generate token
-3. เลือก Chat หรือ Group ที่ต้องการรับแจ้งเตือน
+#### สร้าง Telegram Bot และขอ Token
+1. เปิด Telegram แล้วค้นหา `@BotFather`
+2. ส่งคำสั่ง `/newbot` → ตั้งชื่อและ username ของ bot (ต้องลงท้ายด้วย `bot`)
+3. BotFather จะส่ง **Token** กลับมา (หน้าตาเช่น `123456789:ABC-DEF...`) — เก็บเป็นความลับ
+
+#### หา Chat ID
+1. เปิดแชทกับ bot ที่เพิ่งสร้าง แล้วกด **Start** / ส่งข้อความอะไรก็ได้ (bot จะส่งหาคุณไม่ได้ถ้ายังไม่เคยคุยกัน)
+   - ถ้าต้องการรับแจ้งเตือนในกลุ่ม: เพิ่ม bot เข้ากลุ่ม แล้วส่งข้อความในกลุ่ม
+2. เปิด `https://api.telegram.org/bot<TOKEN>/getUpdates` ในเบราว์เซอร์ (แทน `<TOKEN>` ด้วย Token ของคุณ)
+3. หา `"chat":{"id": ...}` — ตัวเลขนั้นคือ Chat ID (กลุ่มจะเป็นเลขติดลบ เช่น `-1001234567890`)
+
+#### ตั้งค่าตอนรันในเครื่อง
+ใส่ค่าในไฟล์ `.env` (ไฟล์นี้ถูก ignore ไม่ขึ้น git):
+```
+MY_DOTA_ID=...
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+```
 
 ---
 
@@ -68,7 +83,7 @@ git push origin main
 
 ---
 
-## 📱 ตัวอย่าง Line Notification
+## 📱 ตัวอย่าง Telegram Notification
 
 ```
 🎮 พบผู้เล่นใน Watchlist!

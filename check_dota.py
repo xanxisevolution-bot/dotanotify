@@ -8,8 +8,8 @@ load_dotenv()
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
 MY_ACCOUNT_ID        = os.environ.get("MY_DOTA_ID", "")        # Steam32 Account ID
-LINE_CHANNEL_TOKEN   = os.environ.get("LINE_CHANNEL_TOKEN", "") # Line Messaging API Channel Access Token
-LINE_USER_ID         = os.environ.get("LINE_USER_ID", "")       # Line User ID (Uxxxxxxxx...)
+TELEGRAM_BOT_TOKEN   = os.environ.get("TELEGRAM_BOT_TOKEN", "") # Telegram Bot Token (จาก @BotFather)
+TELEGRAM_CHAT_ID     = os.environ.get("TELEGRAM_CHAT_ID", "")   # Telegram Chat ID ที่จะรับแจ้งเตือน
 
 WATCHLIST_FILE = "watchlist.json"
 STATE_FILE     = "state.json"
@@ -62,30 +62,28 @@ def hero_name(heroes, hero_id):
     return heroes.get(str(hero_id), f"Hero#{hero_id}")
 
 
-# ─── LINE MESSAGING API ────────────────────────────────────────────────────────
-def send_line(message):
-    if not LINE_CHANNEL_TOKEN or not LINE_USER_ID:
-        print(f"[LINE] (no credentials) {message}")
+# ─── TELEGRAM BOT API ──────────────────────────────────────────────────────────
+def send_telegram(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print(f"[TELEGRAM] (no credentials) {message}")
         return
     try:
         r = requests.post(
-            "https://api.line.me/v2/bot/message/push",
-            headers={
-                "Authorization": f"Bearer {LINE_CHANNEL_TOKEN}",
-                "Content-Type": "application/json",
-            },
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
             json={
-                "to": LINE_USER_ID,
-                "messages": [{"type": "text", "text": message}]
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+                "link_preview_options": {"is_disabled": True},
             },
             timeout=10
         )
         if r.status_code == 200:
-            print("[LINE] Sent successfully")
+            print("[TELEGRAM] Sent successfully")
         else:
-            print(f"[LINE] Failed: {r.status_code} {r.text}")
+            print(f"[TELEGRAM] Failed: {r.status_code} {r.text}")
     except Exception as e:
-        print(f"[LINE] Error: {e}")
+        # token อยู่ใน URL ของ request จึงอาจติดมากับ error — ปิดบังก่อนพิมพ์
+        print(f"[TELEGRAM] Error: {str(e).replace(TELEGRAM_BOT_TOKEN, '***')}")
 
 
 # ─── MAIN ──────────────────────────────────────────────────────────────────────
@@ -194,7 +192,7 @@ def main():
 
     if alerts:
         for alert in alerts:
-            send_line(alert)
+            send_telegram(alert)
     else:
         print("\nNo watchlisted players found in new matches")
 

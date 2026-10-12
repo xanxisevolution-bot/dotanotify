@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
-LINE_CHANNEL_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN", "")
-LINE_USER_ID       = os.environ.get("LINE_USER_ID", "")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 GSI_TOKEN          = "dota_watchlist_secret"   # ต้องตรงกับใน .cfg
 PORT               = 3001
 
@@ -47,26 +47,27 @@ def load_heroes():
         pass
     return {}
 
-def send_line(message):
-    if not LINE_CHANNEL_TOKEN or not LINE_USER_ID:
-        print(f"[LINE] (no credentials)\n{message}")
+def send_telegram(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print(f"[TELEGRAM] (no credentials)\n{message}")
         return
     try:
         r = requests.post(
-            "https://api.line.me/v2/bot/message/push",
-            headers={
-                "Authorization": f"Bearer {LINE_CHANNEL_TOKEN}",
-                "Content-Type": "application/json",
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+                "link_preview_options": {"is_disabled": True},
             },
-            json={"to": LINE_USER_ID, "messages": [{"type": "text", "text": message}]},
             timeout=10
         )
         if r.status_code == 200:
-            print("[LINE] Sent successfully")
+            print("[TELEGRAM] Sent successfully")
         else:
-            print(f"[LINE] Failed: {r.status_code} {r.text}")
+            print(f"[TELEGRAM] Failed: {r.status_code} {r.text}")
     except Exception as e:
-        print(f"[LINE] Error: {e}")
+        # token อยู่ใน URL ของ request จึงอาจติดมากับ error — ปิดบังก่อนพิมพ์
+        print(f"[TELEGRAM] Error: {str(e).replace(TELEGRAM_BOT_TOKEN, '***')}")
 
 
 # ─── MATCH CHECK ───────────────────────────────────────────────────────────────
@@ -136,7 +137,7 @@ def check_players(gsi_data):
     if alerts:
         alerted_match_id = match_id
         for alert in alerts:
-            send_line(alert)
+            send_telegram(alert)
         print(f"Sent {len(alerts)} alert(s) for match {match_id}")
     else:
         alerted_match_id = match_id   # mark ว่าเช็คแล้ว ไม่เจอ
