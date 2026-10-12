@@ -20,8 +20,8 @@ MATCH_LIMIT = 20
 @dataclass
 class Config:
     my_account_id: str = ""
-    line_channel_token: str = ""
-    line_user_id: str = ""
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
     check_interval_min: int = 5
     gsi_port: int = 3001
     gsi_token: str = ""
@@ -67,8 +67,8 @@ def parse_settings(values):
 
     return {
         "my_account_id": my_account_id,
-        "line_channel_token": str(values["line_channel_token"]).strip(),
-        "line_user_id": str(values["line_user_id"]).strip(),
+        "telegram_bot_token": str(values["telegram_bot_token"]).strip(),
+        "telegram_chat_id": str(values["telegram_chat_id"]).strip(),
         "check_interval_min": check_interval_min,
         "gsi_port": gsi_port,
         "gsi_token": gsi_token,
@@ -185,31 +185,32 @@ def load_heroes():
     return {}
 
 
-def send_line(token, user_id, message):
-    if not token or not user_id:
-        return False, "กรุณาตั้งค่า LINE Channel Access Token และ User ID"
+def send_telegram(token, chat_id, message):
+    if not token or not chat_id:
+        return False, "กรุณาตั้งค่า Telegram Bot Token และ Chat ID"
     try:
         response = requests.post(
-            "https://api.line.me/v2/bot/message/push",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": message,
+                "link_preview_options": {"is_disabled": True},
             },
-            json={"to": user_id, "messages": [{"type": "text", "text": message}]},
             timeout=10,
         )
         if response.status_code == 200:
             return True, "ส่งข้อความสำเร็จ"
-        return False, f"LINE ตอบกลับ HTTP {response.status_code}: {response.text}"
+        return False, f"Telegram ตอบกลับ HTTP {response.status_code}: {response.text}"
     except Exception as error:
-        return False, f"ส่ง LINE ไม่สำเร็จ: {error}"
+        # token อยู่ใน URL ของ request จึงอาจติดมากับข้อความ error — ปิดบังก่อนส่งต่อ
+        return False, f"ส่ง Telegram ไม่สำเร็จ: {str(error).replace(token, '***')}"
 
 
 def deliver_alert(cfg, alert, log):
-    if not cfg.line_channel_token or not cfg.line_user_id:
-        log(f"[ไม่ได้ตั้งค่า LINE] {alert}")
+    if not cfg.telegram_bot_token or not cfg.telegram_chat_id:
+        log(f"[ไม่ได้ตั้งค่า Telegram] {alert}")
         return True
-    ok, info = send_line(cfg.line_channel_token, cfg.line_user_id, alert)
+    ok, info = send_telegram(cfg.telegram_bot_token, cfg.telegram_chat_id, alert)
     log(info)
     return ok
 

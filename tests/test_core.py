@@ -15,13 +15,18 @@ def test_config_roundtrip_and_defaults(tmp_path, monkeypatch):
 
     assert core.load_config() == config
 
-    core.save_json(tmp_path / "config.json", {"line_user_id": "U123", "unknown": True})
+    core.save_json(
+        tmp_path / "config.json",
+        {"telegram_chat_id": "123456", "line_user_id": "U123", "unknown": True},
+    )
     loaded = core.load_config()
-    assert loaded.line_user_id == "U123"
+    assert loaded.telegram_chat_id == "123456"
     assert loaded.my_account_id == ""
     assert loaded.check_interval_min == 5
     assert loaded.gsi_token
     assert not hasattr(loaded, "unknown")
+    # config ที่บันทึกไว้ตั้งแต่ยังใช้ LINE ต้องโหลดได้ และคีย์ LINE เดิมถูกทิ้ง
+    assert not hasattr(loaded, "line_user_id")
 
 
 def test_load_config_generates_and_persists_gsi_token(tmp_path, monkeypatch):
@@ -283,18 +288,114 @@ def test_account_switch_resets_cursor_to_new_baseline(monkeypatch):
     assert state == {"last_match_id": 17, "account_id": "2", "failures": {}}
 
 
-def test_deliver_alert_without_line_credentials_logs_and_succeeds():
+def test_deliver_alert_without_telegram_credentials_logs_and_succeeds():
     messages = []
 
     assert core.deliver_alert(core.Config(), "alert text", messages.append)
-    assert messages == ["[ไม่ได้ตั้งค่า LINE] alert text"]
+    assert messages == ["[ไม่ได้ตั้งค่า Telegram] alert text"]
+
+
+def test_deliver_alert_sends_with_telegram_credentials(monkeypatch):
+    sent = []
+
+    def fake_send(token, chat_id, message):
+        sent.append((token, chat_id, message))
+        return True, "sent"
+
+    monkeypatch.setattr(core, "send_telegram", fake_send)
+    messages = []
+    cfg = core.Config(telegram_bot_token="123:abc", telegram_chat_id="42")
+
+    assert core.deliver_alert(cfg, "alert text", messages.append)
+    assert sent == [("123:abc", "42", "alert text")]
+    assert messages == ["sent"]
+
+
+def test_deliver_alert_returns_false_when_telegram_fails(monkeypatch):
+    monkeypatch.setattr(core, "send_telegram", lambda *args: (False, "boom"))
+    messages = []
+    cfg = core.Config(telegram_bot_token="123:abc", telegram_chat_id="42")
+
+    assert not core.deliver_alert(cfg, "alert text", messages.append)
+    assert messages == ["boom"]
+
+
+def test_send_telegram_posts_plain_text_without_link_preview(monkeypatch):
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return SimpleNamespace(status_code=200, text='{"ok":true}')
+
+    monkeypatch.setattr(core.requests, "post", fake_post)
+
+    ok, info = core.send_telegram("123:abc", "-100456", "alert text")
+
+    assert ok
+    assert info == "ส่งข้อความสำเร็จ"
+    # ไม่ส่ง parse_mode: ชื่อผู้เล่น/Note อาจมีอักขระที่ทำให้ Telegram ปฏิเสธข้อความ
+    assert calls == [
+        (
+            "https://api.telegram.org/bot123:abc/sendMessage",
+            {
+                "json": {
+                    "chat_id": "-100456",
+                    "text": "alert text",
+                    "link_preview_options": {"is_disabled": True},
+                },
+                "timeout": 10,
+            },
+        )
+    ]
+
+
+def test_send_telegram_requires_token_and_chat_id(monkeypatch):
+    def fail_post(*args, **kwargs):
+        raise AssertionError("must not send without credentials")
+
+    monkeypatch.setattr(core.requests, "post", fail_post)
+
+    for token, chat_id in (("", "1"), ("123:abc", ""), ("", "")):
+        ok, info = core.send_telegram(token, chat_id, "alert text")
+        assert not ok
+        assert "Telegram" in info
+
+
+def test_send_telegram_reports_http_error(monkeypatch):
+    monkeypatch.setattr(
+        core.requests,
+        "post",
+        lambda *args, **kwargs: SimpleNamespace(
+            status_code=400,
+            text='{"ok":false,"description":"Bad Request: chat not found"}',
+        ),
+    )
+
+    ok, info = core.send_telegram("123:abc", "1", "alert text")
+
+    assert not ok
+    assert "HTTP 400" in info
+    assert "chat not found" in info
+
+
+def test_send_telegram_masks_bot_token_in_errors(monkeypatch):
+    def fake_post(url, **kwargs):
+        raise ConnectionError(f"Max retries exceeded with url: {url}")
+
+    monkeypatch.setattr(core.requests, "post", fake_post)
+
+    ok, info = core.send_telegram("123:secret-token", "1", "alert text")
+
+    assert not ok
+    assert "123:secret-token" not in info
+    assert "/bot***/sendMessage" in info
 
 
 def test_parse_settings_validates_all_values():
     values = {
         "my_account_id": "123",
-        "line_channel_token": " line-token ",
-        "line_user_id": " user-id ",
+        "telegram_bot_token": " bot-token ",
+        "telegram_chat_id": " chat-id ",
         "check_interval_min": "10",
         "gsi_port": "3030",
         "gsi_token": "secure-token",
@@ -303,8 +404,8 @@ def test_parse_settings_validates_all_values():
     }
     assert core.parse_settings(values) == {
         "my_account_id": "123",
-        "line_channel_token": "line-token",
-        "line_user_id": "user-id",
+        "telegram_bot_token": "bot-token",
+        "telegram_chat_id": "chat-id",
         "check_interval_min": 10,
         "gsi_port": 3030,
         "gsi_token": "secure-token",
@@ -384,8 +485,8 @@ def test_account_ids_splits_and_deduplicates_preserving_order():
 def test_parse_settings_normalizes_multiple_account_ids():
     values = {
         "my_account_id": "123,456",
-        "line_channel_token": "",
-        "line_user_id": "",
+        "telegram_bot_token": "",
+        "telegram_chat_id": "",
         "check_interval_min": 5,
         "gsi_port": 3001,
         "gsi_token": "secure-token",

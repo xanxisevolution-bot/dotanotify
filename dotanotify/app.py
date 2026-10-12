@@ -201,20 +201,20 @@ class DotaNotifyApp:
         form.pack(fill="x")
         self.setting_vars = {
             "my_account_id": tk.StringVar(value=self.cfg.my_account_id),
-            "line_channel_token": tk.StringVar(value=self.cfg.line_channel_token),
-            "line_user_id": tk.StringVar(value=self.cfg.line_user_id),
+            "telegram_bot_token": tk.StringVar(value=self.cfg.telegram_bot_token),
+            "telegram_chat_id": tk.StringVar(value=self.cfg.telegram_chat_id),
             "steam_api_key": tk.StringVar(value=self.cfg.steam_api_key),
         }
         labels = [
             ("my_account_id", "My Steam32 Account ID (หลายบัญชีคั่นด้วย ,)"),
-            ("line_channel_token", "LINE Channel Access Token"),
-            ("line_user_id", "LINE User ID"),
+            ("telegram_bot_token", "Telegram Bot Token"),
+            ("telegram_chat_id", "Telegram Chat ID"),
             ("steam_api_key", "Steam Web API Key"),
         ]
         for row, (key, label) in enumerate(labels):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", padx=4, pady=5)
             widget = ttk.Entry(form, textvariable=self.setting_vars[key], width=54)
-            if key in ("line_channel_token", "steam_api_key"):
+            if key in ("telegram_bot_token", "steam_api_key"):
                 widget.configure(show="•")
             widget.grid(row=row, column=1, sticky="ew", padx=4, pady=5)
         form.columnconfigure(1, weight=1)
@@ -231,8 +231,8 @@ class DotaNotifyApp:
         help_text = (
             "Steam32 Account ID: ดูตัวเลขหลัง /players/ ที่ opendota.com/players/<id>; "
             "หลายบัญชีคั่นด้วยจุลภาค (,)\n"
-            "LINE: ใช้ Messaging API Channel Access Token และ Your User ID จาก "
-            "Basic settings (ขึ้นต้นด้วย U)\n"
+            "Telegram: สร้าง bot ที่ @BotFather เพื่อรับ Bot Token; Chat ID ดูได้จาก "
+            "@userinfobot (ต้องกด Start ที่ bot ของคุณก่อน ไม่งั้น bot ส่งข้อความหาไม่ได้)\n"
             "แจ้งเตือนทันที: ใช้ Steam Web API Key จาก steamcommunity.com/dev/apikey "
             "(Domain: localhost) และใส่ -condebug ใน Launch Options ของ Dota 2"
         )
@@ -452,8 +452,8 @@ class DotaNotifyApp:
             updated_cfg = replace(self.cfg, **settings)
             core.save_config(updated_cfg)
             self.cfg.my_account_id = updated_cfg.my_account_id
-            self.cfg.line_channel_token = updated_cfg.line_channel_token
-            self.cfg.line_user_id = updated_cfg.line_user_id
+            self.cfg.telegram_bot_token = updated_cfg.telegram_bot_token
+            self.cfg.telegram_chat_id = updated_cfg.telegram_chat_id
             self.cfg.check_interval_min = updated_cfg.check_interval_min
             self.cfg.gsi_port = updated_cfg.gsi_port
             self.cfg.gsi_token = updated_cfg.gsi_token
@@ -486,14 +486,14 @@ class DotaNotifyApp:
         def run_tests():
             results = []
             try:
-                line_ok, line_info = core.send_line(
-                    cfg.line_channel_token,
-                    cfg.line_user_id,
+                telegram_ok, telegram_info = core.send_telegram(
+                    cfg.telegram_bot_token,
+                    cfg.telegram_chat_id,
                     "🛡️ ทดสอบการแจ้งเตือนจาก DotaNotify สำเร็จ!",
                 )
             except Exception as error:
-                line_ok, line_info = False, str(error)
-            results.append(("LINE", line_ok, line_info))
+                telegram_ok, telegram_info = False, str(error)
+            results.append(("Telegram", telegram_ok, telegram_info))
             if cfg.steam_api_key:
                 steam_ok, steam_info = check_steam_key(cfg.steam_api_key)
                 results.append(("Steam API Key", steam_ok, steam_info))
