@@ -11,6 +11,14 @@ from dotanotify.gsi import _players_by_id, find_dota_cfg_dirs
 
 
 STEAM_API = "https://api.steampowered.com"
+
+# จังหวะทำงาน (วินาที) — ยิ่งสั้นยิ่งแจ้งเร็ว
+POLL_INTERVAL = 0.5           # อ่าน console.log
+FAST_FETCH_INTERVAL = 1       # ถาม Steam ซ้ำถี่ ๆ ช่วงแรกหลังเจอเซิร์ฟเวอร์ (ช่วง Draft)
+FAST_FETCH_WINDOW = 60        # ความยาวของช่วงแรก นับจากเจอเซิร์ฟเวอร์
+SLOW_FETCH_INTERVAL = 3       # หลังช่วงแรก ถามห่างลง
+DELIVERY_RETRY_INTERVAL = 10  # ส่งแจ้งเตือนไม่สำเร็จ: รอนานก่อนลองใหม่ กันเน็ตสะดุดชั่วคราว
+
 _SERVER_ID_PATTERN = re.compile(
     r"steamid:(?P<steam_id>\d{17})"
     r"|\[A:1:(?P<account>\d+):(?P<instance>\d+)\]"
@@ -147,11 +155,13 @@ class InstantMonitor:
         fetch=fetch_realtime_stats,
         clock=time.monotonic,
         on_found=None,
+        on_server=None,
     ):
         self.cfg = cfg
         self.get_watchlist = get_watchlist
         self.log = log
         self.on_alert = on_alert
+        self.on_server = on_server
         self.find_logs = (
             find_logs
             if find_logs is not None
@@ -176,6 +186,9 @@ class InstantMonitor:
         self._last_fetch = None
         self._delivered_ids = set()
         self._found_notified = False
+        self._delivery_failed_before = False
+        self._waiting_logged = False
+        self._roster_logged = False
 
     @property
     def is_running(self):
@@ -230,12 +243,38 @@ class InstantMonitor:
                         self._last_fetch = None
                         self._delivered_ids = set()
                         self._found_notified = False
+                        self._delivery_failed_before = False
+                        self._waiting_logged = False
+                        self._roster_logged = False
                         self.log(
                             f"เจอเซิร์ฟเวอร์แมทช์ใหม่ ({server_id}) "
                             "กำลังดึงรายชื่อผู้เล่น"
                         )
+                        self._start_warm_up(server_id)
 
             self._poll_current_server()
+
+    def _start_warm_up(self, server_id):
+        if self.on_server is None:
+            return
+
+        def run():
+            try:
+                self.on_server(server_id)
+            except Exception as error:
+                self.log(f"เตรียมการเชื่อมต่อแจ้งเตือนไม่สำเร็จ: {error}")
+
+        threading.Thread(target=run, daemon=True, name="DotaNotifyWarmUp").start()
+
+    def _elapsed(self):
+        return self.clock() - self._started_at
+
+    def _fetch_delay(self, now):
+        if self._delivery_failed_before:
+            return DELIVERY_RETRY_INTERVAL
+        if now - self._started_at < FAST_FETCH_WINDOW:
+            return FAST_FETCH_INTERVAL
+        return SLOW_FETCH_INTERVAL
 
     def _first_existing_log(self):
         paths = self.find_logs() if callable(self.find_logs) else self.find_logs
@@ -295,7 +334,7 @@ class InstantMonitor:
         if self._server_id is None or self._handled:
             return
         now = self.clock()
-        if self._last_fetch is not None and now - self._last_fetch < 10:
+        if self._last_fetch is not None and now - self._last_fetch < self._fetch_delay(now):
             self._expire_if_needed(now)
             return
         self._last_fetch = now
@@ -306,8 +345,17 @@ class InstantMonitor:
             stats = None
 
         if not self._has_players(stats):
+            if not self._waiting_logged:
+                self._waiting_logged = True
+                self.log("Steam ยังไม่มีรายชื่อผู้เล่น — ถามซ้ำอัตโนมัติจนกว่าจะได้")
             self._expire_if_needed(now)
             return
+
+        if not self._roster_logged:
+            self._roster_logged = True
+            self.log(
+                f"ได้รายชื่อผู้เล่นหลังเจอเซิร์ฟเวอร์ {self._elapsed():.1f} วินาที"
+            )
 
         alerts = find_watched_in_realtime(
             stats,
@@ -344,6 +392,7 @@ class InstantMonitor:
 
         if delivery_failed:
             self._attempts += 1
+            self._delivery_failed_before = True
             if self._attempts >= 3:
                 self._handled = True
                 self.log(
@@ -358,7 +407,10 @@ class InstantMonitor:
             return
 
         self._handled = True
-        self.log(f"ส่งการแจ้งเตือนทันที {len(alerts)} รายการสำเร็จ")
+        self.log(
+            f"ส่งการแจ้งเตือนทันที {len(alerts)} รายการสำเร็จ "
+            f"(ใช้เวลา {self._elapsed():.1f} วินาทีนับจากเจอเซิร์ฟเวอร์)"
+        )
 
     def _has_players(self, stats):
         if not isinstance(stats, dict):
@@ -389,5 +441,5 @@ class InstantMonitor:
                 self.poll_once()
             except Exception as error:
                 self.log(f"เกิดข้อผิดพลาดในการแจ้งเตือนทันที: {error}")
-            if stop_event.wait(2):
+            if stop_event.wait(POLL_INTERVAL):
                 break

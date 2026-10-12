@@ -32,6 +32,7 @@ class DotaNotifyApp:
             self.log,
             self._send_instant_alert,
             on_found=self._instant_players_found,
+            on_server=self._warm_up_alerts,
         )
         self._build_ui()
         self._refresh_watchlist()
@@ -269,6 +270,9 @@ class DotaNotifyApp:
 
     def _send_instant_alert(self, alert):
         return core.deliver_alert(self.cfg, alert, self.log)
+
+    def _warm_up_alerts(self, _server_id):
+        core.warm_up_telegram(self.cfg.telegram_bot_token)
 
     def _instant_players_found(self, alerts):
         self.events.put(

@@ -327,7 +327,7 @@ def test_send_telegram_posts_plain_text_without_link_preview(monkeypatch):
         calls.append((url, kwargs))
         return SimpleNamespace(status_code=200, text='{"ok":true}')
 
-    monkeypatch.setattr(core.requests, "post", fake_post)
+    monkeypatch.setattr(core._telegram_session, "post", fake_post)
 
     ok, info = core.send_telegram("123:abc", "-100456", "alert text")
 
@@ -353,7 +353,7 @@ def test_send_telegram_requires_token_and_chat_id(monkeypatch):
     def fail_post(*args, **kwargs):
         raise AssertionError("must not send without credentials")
 
-    monkeypatch.setattr(core.requests, "post", fail_post)
+    monkeypatch.setattr(core._telegram_session, "post", fail_post)
 
     for token, chat_id in (("", "1"), ("123:abc", ""), ("", "")):
         ok, info = core.send_telegram(token, chat_id, "alert text")
@@ -363,7 +363,7 @@ def test_send_telegram_requires_token_and_chat_id(monkeypatch):
 
 def test_send_telegram_reports_http_error(monkeypatch):
     monkeypatch.setattr(
-        core.requests,
+        core._telegram_session,
         "post",
         lambda *args, **kwargs: SimpleNamespace(
             status_code=400,
@@ -382,13 +382,28 @@ def test_send_telegram_masks_bot_token_in_errors(monkeypatch):
     def fake_post(url, **kwargs):
         raise ConnectionError(f"Max retries exceeded with url: {url}")
 
-    monkeypatch.setattr(core.requests, "post", fake_post)
+    monkeypatch.setattr(core._telegram_session, "post", fake_post)
 
     ok, info = core.send_telegram("123:secret-token", "1", "alert text")
 
     assert not ok
     assert "123:secret-token" not in info
     assert "/bot***/sendMessage" in info
+
+
+def test_warm_up_telegram_pings_get_me_and_swallows_errors(monkeypatch):
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        raise ConnectionError(f"offline: {url}")
+
+    monkeypatch.setattr(core._telegram_session, "get", fake_get)
+
+    core.warm_up_telegram("123:abc")  # ต้องไม่โยน error แม้เน็ตมีปัญหา
+    core.warm_up_telegram("")  # ไม่มี token ก็ไม่ต้องยิงอะไร
+
+    assert calls == [("https://api.telegram.org/bot123:abc/getMe", {"timeout": 5})]
 
 
 def test_parse_settings_validates_all_values():

@@ -185,11 +185,25 @@ def load_heroes():
     return {}
 
 
+# ใช้การเชื่อมต่อเดิมซ้ำ: เปิดใหม่ทุกครั้งช้ากว่า ~0.3 วินาที (TLS handshake)
+_telegram_session = requests.Session()
+
+
+def warm_up_telegram(token):
+    # เปิดการเชื่อมต่อไว้ก่อนมีข้อความจะส่ง ให้ข้อความแรกออกเร็วขึ้น
+    if not token:
+        return
+    try:
+        _telegram_session.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
+    except Exception:
+        pass  # แค่อุ่นเครื่อง ถ้าไม่สำเร็จ ตอนส่งจริงจะเปิดการเชื่อมต่อใหม่เอง
+
+
 def send_telegram(token, chat_id, message):
     if not token or not chat_id:
         return False, "กรุณาตั้งค่า Telegram Bot Token และ Chat ID"
     try:
-        response = requests.post(
+        response = _telegram_session.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={
                 "chat_id": chat_id,

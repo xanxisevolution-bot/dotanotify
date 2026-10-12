@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -169,7 +170,14 @@ def _stats_with_player(account_id=200):
 
 
 def _make_monitor(
-    path, fetch, clock, on_alert=None, logs=None, on_found=None, watchlist=None
+    path,
+    fetch,
+    clock,
+    on_alert=None,
+    logs=None,
+    on_found=None,
+    watchlist=None,
+    on_server=None,
 ):
     log_messages = logs if logs is not None else []
     return instant.InstantMonitor(
@@ -183,6 +191,7 @@ def _make_monitor(
         fetch=fetch,
         clock=clock,
         on_found=on_found,
+        on_server=on_server,
     )
 
 
@@ -215,14 +224,14 @@ def test_poll_ignores_existing_console_history_and_delivers_new_match_once(
     assert len(alerts) == 1
 
 
-def test_poll_waits_ten_seconds_between_empty_stats_fetches(tmp_path):
+def test_poll_asks_steam_every_second_at_first_then_every_three_seconds(tmp_path):
     path = tmp_path / "console.log"
     path.write_text("", encoding="utf-8")
-    current_time = [0]
+    current_time = [0.0]
     fetch_calls = []
     monitor = _make_monitor(
         path,
-        lambda _key, server_id: (fetch_calls.append(server_id), {"teams": []})[1],
+        lambda _key, _server_id: (fetch_calls.append(current_time[0]), {"teams": []})[1],
         lambda: current_time[0],
     )
     monitor.poll_once()
@@ -230,14 +239,142 @@ def test_poll_waits_ten_seconds_between_empty_stats_fetches(tmp_path):
         console_log.write(
             f"server steamid:{instant.gameserver_steam_id(3, 300)}\n"
         )
-    monitor.poll_once()
-    current_time[0] = 9
-    monitor.poll_once()
-    assert len(fetch_calls) == 1
+    monitor.poll_once()  # เจอเซิร์ฟเวอร์ที่ t=0 ถามทันที
+    assert fetch_calls == [0.0]
 
-    current_time[0] = 10
+    for moment in (0.5, 0.9, 1.0, 1.5, 2.0, 59.0, 59.5, 60.0, 61.0, 62.0, 63.0, 64.0):
+        current_time[0] = moment
+        monitor.poll_once()
+
+    # ช่วง 60 วินาทีแรกถามทุก 1 วินาที หลังจากนั้นทุก 3 วินาที
+    assert fetch_calls == [0.0, 1.0, 2.0, 59.0, 62.0]
+
+
+def test_failed_delivery_waits_ten_seconds_before_retrying(tmp_path, monkeypatch):
+    monkeypatch.setattr(instant.core, "load_heroes", lambda: {})
+    path = tmp_path / "console.log"
+    path.write_text("", encoding="utf-8")
+    current_time = [0.0]
+    fetch_calls = []
+    delivery_results = iter([False, True])
+    monitor = _make_monitor(
+        path,
+        lambda *_args: (fetch_calls.append(current_time[0]), _stats_with_player())[1],
+        lambda: current_time[0],
+        lambda _alert: next(delivery_results),
+    )
     monitor.poll_once()
-    assert len(fetch_calls) == 2
+    with path.open("a", encoding="utf-8") as console_log:
+        console_log.write(
+            f"server steamid:{instant.gameserver_steam_id(12, 1200)}\n"
+        )
+    monitor.poll_once()  # t=0 ส่งไม่สำเร็จครั้งแรก
+
+    # ส่งไม่สำเร็จ: ไม่ลองถี่เหมือนตอนรอรายชื่อ กันเน็ตสะดุดชั่วคราวทำให้เลิกลองเร็วเกินไป
+    for moment in (1.0, 5.0, 9.9):
+        current_time[0] = moment
+        monitor.poll_once()
+    assert fetch_calls == [0.0]
+    assert not monitor._handled
+
+    current_time[0] = 10.0
+    monitor.poll_once()
+    assert fetch_calls == [0.0, 10.0]
+    assert monitor._handled
+
+
+def test_poll_logs_waiting_once_and_how_long_the_roster_and_alert_took(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(instant.core, "load_heroes", lambda: {})
+    path = tmp_path / "console.log"
+    path.write_text("", encoding="utf-8")
+    current_time = [0.0]
+    fetch_count = [0]
+
+    def fetch(*_args):
+        fetch_count[0] += 1
+        return {"teams": []} if fetch_count[0] < 4 else _stats_with_player()
+
+    logs = []
+    monitor = _make_monitor(path, fetch, lambda: current_time[0], logs=logs)
+    monitor.poll_once()
+    with path.open("a", encoding="utf-8") as console_log:
+        console_log.write(
+            f"server steamid:{instant.gameserver_steam_id(14, 1400)}\n"
+        )
+    for moment in (0.0, 1.0, 2.0, 3.0):
+        current_time[0] = moment
+        monitor.poll_once()
+
+    assert fetch_count[0] == 4
+    assert sum("Steam ยังไม่มีรายชื่อผู้เล่น" in message for message in logs) == 1
+    assert "ได้รายชื่อผู้เล่นหลังเจอเซิร์ฟเวอร์ 3.0 วินาที" in logs
+    assert any(
+        message.startswith("ส่งการแจ้งเตือนทันที 1 รายการสำเร็จ")
+        and "3.0 วินาที" in message
+        for message in logs
+    )
+
+
+def _join_warm_up_threads():
+    for thread in threading.enumerate():
+        if thread.name == "DotaNotifyWarmUp":
+            thread.join(timeout=2)
+
+
+def test_new_server_triggers_warm_up_once_per_server(tmp_path):
+    path = tmp_path / "console.log"
+    path.write_text("", encoding="utf-8")
+    warmed = []
+    monitor = _make_monitor(
+        path,
+        lambda *_args: {"teams": []},
+        lambda: 0,
+        on_server=warmed.append,
+    )
+    monitor.poll_once()
+    server_id = instant.gameserver_steam_id(13, 1300)
+    with path.open("a", encoding="utf-8") as console_log:
+        console_log.write(f"server steamid:{server_id}\n")
+    monitor.poll_once()
+    monitor.poll_once()
+    _join_warm_up_threads()
+    assert warmed == [str(server_id)]
+
+    next_server_id = instant.gameserver_steam_id(15, 1500)
+    with path.open("a", encoding="utf-8") as console_log:
+        console_log.write(f"server steamid:{next_server_id}\n")
+    monitor.poll_once()
+    _join_warm_up_threads()
+    assert warmed == [str(server_id), str(next_server_id)]
+
+
+def test_warm_up_error_is_logged_and_does_not_break_polling(tmp_path):
+    path = tmp_path / "console.log"
+    path.write_text("", encoding="utf-8")
+    logs = []
+
+    def broken_warm_up(_server_id):
+        raise RuntimeError("boom")
+
+    monitor = _make_monitor(
+        path,
+        lambda *_args: {"teams": []},
+        lambda: 0,
+        logs=logs,
+        on_server=broken_warm_up,
+    )
+    monitor.poll_once()
+    with path.open("a", encoding="utf-8") as console_log:
+        console_log.write(
+            f"server steamid:{instant.gameserver_steam_id(16, 1600)}\n"
+        )
+    monitor.poll_once()
+    _join_warm_up_threads()
+
+    assert any("เตรียมการเชื่อมต่อแจ้งเตือนไม่สำเร็จ: boom" in message for message in logs)
+    assert monitor._server_id is not None
 
 
 def test_poll_retries_failed_alerts_without_resending_delivered_alerts(
